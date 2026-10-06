@@ -1,4 +1,4 @@
-import chisel3.*
+import chisel3._
 import chisel3.util.Decoupled
 
 /** Accepts vectors of eight input bytes for JSON parsing. */

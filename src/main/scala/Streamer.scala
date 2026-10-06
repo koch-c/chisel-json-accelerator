@@ -1,4 +1,4 @@
-import chisel3.*
+import chisel3._
 import chisel3.util.Decoupled
 
 /** Receives vectors of eight bytes using Chisel's ready/valid interface. */

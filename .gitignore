@@ -1,2 +1,5 @@
 /.metals
-/.scala-build/.bloop
+/project
+/target
+/.bsp
+/.bloop
