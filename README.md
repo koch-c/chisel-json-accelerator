@@ -16,6 +16,8 @@ The JSON file used in the MVP will be
 { "temperature": 25, "humidity": 60 }
 ```
 
+Could be cool to hit ~4 Bytes / Cycle parsing.
+
 ## Post MVP features
 
 - Multiple target keys
