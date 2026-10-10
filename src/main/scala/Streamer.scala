@@ -10,3 +10,5 @@ class Streamer extends Module {
   // The streamer can accept a word on every cycle.
   io.in.ready := true.B
 }
+
+
