@@ -1,5 +1,15 @@
-/.metals
-/project
-/target
-/.bsp
-/.bloop
+# Scala and sbt build output
+target/
+project/project/
+*.semanticdb
+
+# Metals and Scala CLI generated files
+.metals/
+.bsp/
+.bloop/
+.scala-build/
+project/metals.sbt
+
+# Local editor and macOS files
+.vscode/
+.DS_Store
