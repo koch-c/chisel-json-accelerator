@@ -14,3 +14,4 @@ project/metals.sbt
 .vscode/
 .DS_Store
 /test_run_dir
+/generated
