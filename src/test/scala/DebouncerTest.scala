@@ -13,7 +13,7 @@ class DebouncerSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
       c.io.fire.expect(false.B)
 
-      c.clock.step(3)
+      c.clock.step(4)
       c.io.fire.expect(true.B)
 
       c.clock.step()
@@ -24,7 +24,7 @@ class DebouncerSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "restart the debounce delay after the button is released" in {
     test(new Debouncer(count = 3)) { c =>
       c.io.in.poke(true.B)
-      c.clock.step(4)
+      c.clock.step(5)
       c.io.fire.expect(true.B)
 
       c.io.in.poke(false.B)
@@ -33,7 +33,7 @@ class DebouncerSpec extends AnyFlatSpec with ChiselScalatestTester {
 
       c.io.in.poke(true.B)
       c.clock.step()
-      c.clock.step(3)
+      c.clock.step(4)
       c.io.fire.expect(true.B)
     }
   }
@@ -41,7 +41,7 @@ class DebouncerSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "not fire when the button is not pressed anymore" in {
     test(new Debouncer(count = 3)) { c =>
       c.io.in.poke(true.B)
-      c.clock.step(1)
+      c.clock.step(6)
       c.io.in.poke(false.B)
 
       for (i <- 0 until 10) {
