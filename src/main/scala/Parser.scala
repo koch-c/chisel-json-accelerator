@@ -6,7 +6,6 @@ class Parser(key: String) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(Vec(8, UInt(8.W))))
     val found    = Output(Bool())
-    val notFound = Output(Bool())
   })
 
   def ch(c: Char) = c.toInt.U(8.W)
@@ -58,7 +57,6 @@ class Parser(key: String) extends Module {
   }
 
   io.found    := found
-  io.notFound := done && !found
 }
 
 
