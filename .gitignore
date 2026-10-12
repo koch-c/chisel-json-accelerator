@@ -13,3 +13,5 @@ project/metals.sbt
 # Local editor and macOS files
 .vscode/
 .DS_Store
+/test_run_dir
+/generated

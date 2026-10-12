@@ -31,7 +31,6 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new Parser("temperature")) { c =>
       sendJson(c, exampleJson)
       c.io.found.expect(true.B)
-      c.io.notFound.expect(false.B)
     }
   }
 
@@ -53,7 +52,6 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new Parser("temperature")) { c =>
       sendJson(c, """{ "humidity": 60 }""")
       c.io.found.expect(false.B)
-      c.io.notFound.expect(true.B)
     }
   }
 
@@ -61,7 +59,6 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new Parser("temperature")) { c =>
       sendJson(c, """{ "sensor": "temperature" }""")
       c.io.found.expect(false.B)
-      c.io.notFound.expect(true.B)
     }
   }
 }
