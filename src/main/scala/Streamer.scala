@@ -2,7 +2,7 @@ import chisel3._
 import chisel3.util.Decoupled
 import chisel3.util.log2Ceil
 
-/** Receives vectors of eight bytes using Chisel's ready/valid interface. */
+/** Receives json string using Chisel's ready/valid interface. */
 class Streamer(json: String) extends Module {
   val io = IO(new Bundle {
     
