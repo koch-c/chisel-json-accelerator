@@ -1,7 +1,7 @@
 import chisel3._
 import chisel3.util.Decoupled
 
-class Accelerator(key: String) extends Module {
+class Accelerator(key: String, json: String) extends Module {
   val io = IO(new Bundle {
     val button = Input(Bool())
     val found = Output(Bool())
@@ -11,8 +11,7 @@ class Accelerator(key: String) extends Module {
   })
 
   val parser = Module(new Parser(key))
-  val streamer = Module(new Streamer())
-  parser.io.in <> streamer.io.out
+  val streamer = Module(new Streamer(json))
   val debouncer = Module(new Debouncer(2_000_000))
 
   parser.io.in <> streamer.io.out
@@ -27,7 +26,7 @@ class Accelerator(key: String) extends Module {
 
 object GenerateAccelerator extends App {
   emitVerilog(
-    new Accelerator("temperature"),
+    new Accelerator("temperature","{ \"temperature\": 25, \"humidity\": 60 }"),
     Array("--target-dir", "generated")
   )
 }
