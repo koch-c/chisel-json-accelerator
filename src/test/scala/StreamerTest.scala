@@ -41,4 +41,30 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  // 64 chars = exactly 8 words, so currWord is 3 bits and wraps from 7 back to 0
+  // after the last word. done must still stop the Streamer from sending word 0 again.
+  it should "stop after the last word when the word count is a power of two" in {
+    val json = """{ "temperature": 25, "humidity": 60, "pressure": 1013, "id": 7 }"""
+    require(json.length == 64)
+
+    test(new Streamer(json)) { c =>
+        c.io.out.valid.expect(true.B)
+        validateWord(c, """{ "tempe""")
+
+        for (word <- Seq("""rature":""", """ 25, "hu""", """midity":""", """ 60, "pr""",
+                         """essure":""", """ 1013, """", """id": 7 }""")) {
+          waitUntilIdle(c)
+          c.io.out.valid.expect(true.B)
+          validateWord(c, word)
+        }
+
+        // Hand over the last word, then keep ready high so any extra word would be taken
+        c.io.out.ready.poke(true.B)
+        for (_ <- 0 until 20) {
+          c.clock.step(1)
+          c.io.out.valid.expect(false.B)
+        }
+    }
+  }
+
 }
