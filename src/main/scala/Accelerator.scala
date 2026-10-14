@@ -4,7 +4,6 @@ import chisel3.util.Decoupled
 class Accelerator(key: String, json: String, debounce: Int) extends Module {
   val io = IO(new Bundle {
     val button = Input(Bool())
-    val found = Output(Bool())
     val LED16_R = Output(Bool())
     val LED16_G = Output(Bool())
     val LED16_B = Output(Bool())
