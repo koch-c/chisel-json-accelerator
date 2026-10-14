@@ -6,6 +6,7 @@ class Parser(key: String) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(Vec(8, UInt(8.W))))
     val found    = Output(Bool())
+    val done = Output(Bool())
   })
 
   def ch(c: Char) = c.toInt.U(8.W)
@@ -21,6 +22,7 @@ class Parser(key: String) extends Module {
   val hit      = RegInit(false.B) // string matches the key
   val found    = RegInit(false.B)
   val done     = RegInit(false.B)
+  io.done := done
 
   io.in.ready := !busy
   when(io.in.fire) {
@@ -50,6 +52,7 @@ class Parser(key: String) extends Module {
         isMatching := true.B
       }.elsewhen(c === ch(':') && hit) {
         found := true.B
+        done := true.B
       }.elsewhen(c === ch('}')) { 
         done := true.B
       }
