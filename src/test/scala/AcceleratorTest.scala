@@ -15,7 +15,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   def expectLeds(c: Accelerator, redOn: Boolean, greenOn: Boolean): Unit = {
     c.io.LED16_R.expect((redOn).B)
     c.io.LED16_G.expect((greenOn).B)
-    c.io.LED16_B.expect(true.B)
+    c.io.LED16_B.expect(false.B)
   }
 
   "Accelerator" should "keep all LEDs off without a button press when the key is present" in {

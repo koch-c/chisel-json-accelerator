@@ -19,14 +19,14 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
 
   parser.io.in.bits := streamer.io.out.bits
   streamer.io.out.ready := Mux(start, parser.io.in.ready, false.B)
-  parser.io.in.valid := streamer.io.out.valid
+  parser.io.in.valid := streamer.io.out.valid && start
 
   io.found := parser.io.found
   def is_done(bit: Bool) = parser.io.done && bit
 
   io.LED16_R := is_done(!io.found)
   io.LED16_G := is_done(io.found)
-  io.LED16_B := true.B
+  io.LED16_B := false.B
 }
 
 object GenerateAccelerator extends App {
