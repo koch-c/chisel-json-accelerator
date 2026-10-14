@@ -22,3 +22,4 @@ project/metals.sbt
 *.log
 dfx_runtime.txt
 .Xil/
+/vivado_pid*.str
