@@ -1,7 +1,7 @@
 import chisel3._
 import chisel3.util.Decoupled
 
-class Accelerator(key: String, json: String) extends Module {
+class Accelerator(key: String, json: String, debounce: Int) extends Module {
   val io = IO(new Bundle {
     val button = Input(Bool())
     val found = Output(Bool())
@@ -12,10 +12,14 @@ class Accelerator(key: String, json: String) extends Module {
 
   val parser = Module(new Parser(key))
   val streamer = Module(new Streamer(json))
-  val debouncer = Module(new Debouncer(2_000_000))
-
-  parser.io.in <> streamer.io.out
+  val debouncer = Module(new Debouncer(debounce))
   debouncer.io.in := io.button
+  val start = RegInit(false.B)
+  start := Mux(debouncer.io.fire, true.B, start)
+
+  parser.io.in.bits := streamer.io.out.bits
+  streamer.io.out.ready := Mux(start, parser.io.in.ready, false.B)
+  parser.io.in.valid := streamer.io.out.valid
 
   // LED are on when pulled low. I think :)
   io.found := parser.io.found
@@ -26,7 +30,7 @@ class Accelerator(key: String, json: String) extends Module {
 
 object GenerateAccelerator extends App {
   emitVerilog(
-    new Accelerator("temperature","{ \"temperature\": 25, \"humidity\": 60 }"),
+    new Accelerator("temperature","{ \"temperature\": 25, \"humidity\": 60 }", 2_000_000),
     Array("--target-dir", "generated")
   )
 }
