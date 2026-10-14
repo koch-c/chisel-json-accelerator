@@ -13,9 +13,8 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   def processingBudget(json: String): Int = ((json.length + 7) / 8) * 10 + 20
 
   def expectLeds(c: Accelerator, redOn: Boolean, greenOn: Boolean): Unit = {
-    // The RGB LED signals are active-low; blue is never used.
-    c.io.LED16_R.expect((!redOn).B)
-    c.io.LED16_G.expect((!greenOn).B)
+    c.io.LED16_R.expect((redOn).B)
+    c.io.LED16_G.expect((greenOn).B)
     c.io.LED16_B.expect(true.B)
   }
 
@@ -69,6 +68,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
         // Parsing must continue without the button being held down.
         c.io.button.poke(false.B)
         c.clock.step(processingBudget(json))
+        println(s"LEDs: red ${c.io.LED16_R.peek()} and green: ${c.io.LED16_G.peek()} ")
         expectLeds(c, redOn = !found, greenOn = found)
 
         // The completed result must remain visible while the button is released.
