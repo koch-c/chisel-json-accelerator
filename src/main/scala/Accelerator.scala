@@ -17,11 +17,11 @@ class Accelerator(key: String, json: String) extends Module {
   parser.io.in <> streamer.io.out
   debouncer.io.in := io.button
 
-  // LED are on when pulled low. I think :)
   io.found := parser.io.found
-  io.LED16_R := io.found
-  io.LED16_G := !io.found
-  io.LED16_B := true.B
+  // The Nexys 4 DDR RGB LED is on when driven high
+  io.LED16_R := !io.found
+  io.LED16_G := io.found
+  io.LED16_B := false.B
 }
 
 object GenerateAccelerator extends App {

@@ -15,3 +15,10 @@ project/metals.sbt
 .DS_Store
 /test_run_dir
 /generated
+/build
+
+# Vivado
+*.jou
+*.log
+dfx_runtime.txt
+.Xil/
