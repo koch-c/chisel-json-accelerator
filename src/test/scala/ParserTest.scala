@@ -34,17 +34,19 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "only raise found after the colon following the key" in {
+  it should "only raise found and done after the colon following the key" in {
     test(new Parser("temperature")) { c =>
       // Word 1: { "tempe  -> key only partially seen
       sendWord(c, """{ "tempe""")
       waitUntilIdle(c)
       c.io.found.expect(false.B)
+      c.io.done.expect(false.B)
 
       // Word 2: rature":  -> key complete, followed by ':'
       sendWord(c, """rature":""")
       waitUntilIdle(c)
       c.io.found.expect(true.B)
+      c.io.done.expect(true.B)
     }
   }
 
