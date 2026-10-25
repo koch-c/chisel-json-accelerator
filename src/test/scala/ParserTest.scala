@@ -130,6 +130,52 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  val escapedJson =
+    """{
+      |  "nebula\ncluster": {
+      |    "x7q\tpulse": {
+      |      "crystal\"node": {
+      |        "You found me": "Hidden value discovered!",
+      |        "line\\break": "Found\\Hidden",
+      |        "quote\"key": "escaped quote",
+      |        "forward\/slash": "slash value"
+      |      },
+      |      "orbit\rpath": "silver"
+      |    },
+      |    "drift\bzone": 42
+      |  },
+      |  "vortex\fcore": {
+      |    "kappa_91": {
+      |      "signal\ntrace": {
+      |        "frequency": 8.62,
+      |        "status": "stable"
+      |      }
+      |    }
+      |  }
+      |}""".stripMargin //just to make the JSON human readable
+
+  it should "stay in sync through every kind of escape sequence" in {
+    test(new Parser("status")) { c => // last key, after all the escapes
+      sendJson(c, escapedJson)
+      c.io.found.expect(true.B)
+      c.io.done.expect(true.B)
+    }
+  }
+
+  it should "find a key containing an escaped quote" in {
+    test(new Parser("""quote\"key""")) { c =>
+      sendJson(c, escapedJson)
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "find a key containing an escaped backslash" in {
+    test(new Parser("""line\\break""")) { c =>
+      sendJson(c, escapedJson)
+      c.io.found.expect(true.B)
+    }
+  }
+
   it should "only be done when the outermost object closes" in {
     test(new Parser("temperature")) { c =>
       sendJson(c, """{ "a": { "b": [1, 2] }, "c": 3 }""")

@@ -79,5 +79,6 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
 //Buffer for longer keys (Dynamic)
 //Match only at a given depth / full paths (e.g. device.location.latitude)
 //Flag an error when depth exceeds maxDepth or brackets are unbalanced
+//Unicode escapes are not decoded, keys are compared byte by byte as written in the file
 
 //Example JSON { "temperature": 25, "humidity": 60 }
