@@ -4,10 +4,12 @@ import chisel3.util.{Decoupled, log2Ceil}
 /** Accepts vectors of eight input bytes for JSON parsing.
   * Handles nested objects/arrays and escaped characters in strings.
   * Maybe look at the max depth, if we feel like 32 is overkill
+  * After the key is found, the bytes of its value are sent out on io.value.
   */
 class Parser(key: String, maxDepth: Int = 32) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(Vec(8, UInt(8.W))))
+    val value = Decoupled(UInt(8.W)) // bytes of the found value
     val found    = Output(Bool())
     val done = Output(Bool())
   })
@@ -26,6 +28,8 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
   val isMatching = RegInit(false.B) // current string still matches key
   val hit      = RegInit(false.B) // string matches the key
   val found    = RegInit(false.B)
+  val inValue  = RegInit(false.B) // sending the value of the found key
+  val valueDepth = RegInit(0.U(log2Ceil(maxDepth + 1).W)) // depth of the found key
   val done     = RegInit(false.B)
   io.done := done
 
@@ -37,7 +41,16 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
   }
 
   val c = word(pos)
-  when(busy) {
+
+  // The value ends at a ',', '}' or ']' on the same level as the key
+  val valueEnds = !inString && depth === valueDepth &&
+    (c === ch(',') || c === ch('}') || c === ch(']'))
+  val isSpace = c === ch(' ') || c === ch('\n') || c === ch('\r') || c === ch('\t')
+  io.value.valid := busy && inValue && !valueEnds && (inString || !isSpace) // skip whitespace outside strings purely for performance, not necessary and may be confusing
+  io.value.bits  := c
+  val stall = io.value.valid && !io.value.ready // wait until the byte is taken
+
+  when(busy && !stall) {
     pos := pos + 1.U
     when(pos === 7.U) { busy := false.B }
 
@@ -54,14 +67,18 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
             isMatching := false.B
           }
         }
+      }.elsewhen(inValue && valueEnds) {
+        inValue := false.B
+        done := true.B
       }.elsewhen(c === ch('"')) {
         inString := true.B
         escaped := false.B
         charsMatched := 0.U
         isMatching := true.B
-      }.elsewhen(c === ch(':') && hit) { // only keys are followed by ':'
+      }.elsewhen(c === ch(':') && hit && !inValue) { // only keys are followed by ':'
         found := true.B
-        done := true.B
+        inValue := true.B
+        valueDepth := depth
       }.elsewhen(c === ch('{') || c === ch('[')) {
         depth := depth + 1.U
       }.elsewhen(c === ch('}') || c === ch(']')) {

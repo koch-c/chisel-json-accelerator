@@ -8,6 +8,7 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   // Send one 8-char word: wait until the parser is ready, then hand it over
   def sendWord(c: Parser, word: String): Unit = {
+    c.io.value.ready.poke(true.B) // always take value bytes
     for ((char, i) <- word.zipWithIndex) c.io.in.bits(i).poke(char.toInt.U)
     c.io.in.valid.poke(true.B)
     while (!c.io.in.ready.peek().litToBoolean) c.clock.step()
@@ -27,6 +28,30 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     waitUntilIdle(c)
   }
 
+  // Send a JSON cycle by cycle and collect the value bytes until done.
+  // With slowReader the value output is only ready every 4th cycle.
+  // ADHOC reader helper function, to test value return functionality
+  def readValue(c: Parser, json: String, slowReader: Boolean = false): String = {
+    val words = json.padTo((json.length + 7) / 8 * 8, ' ').grouped(8).toSeq
+    val value = new StringBuilder
+    var sent = 0
+    var cycle = 0
+    while (!c.io.done.peek().litToBoolean && cycle < 5000) {
+      if (sent < words.length) {
+        for ((char, i) <- words(sent).zipWithIndex) c.io.in.bits(i).poke(char.toInt.U)
+      }
+      c.io.in.valid.poke((sent < words.length).B)
+      c.io.value.ready.poke((!slowReader || cycle % 4 == 0).B)
+      if (sent < words.length && c.io.in.ready.peek().litToBoolean) sent += 1
+      if (c.io.value.valid.peek().litToBoolean && c.io.value.ready.peek().litToBoolean) {
+        value += c.io.value.bits.peek().litValue.toChar
+      }
+      c.clock.step()
+      cycle += 1
+    }
+    value.toString
+  }
+
   "Parser" should "find temperature in the example JSON" in {
     test(new Parser("temperature")) { c =>
       sendJson(c, exampleJson)
@@ -34,7 +59,7 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "only raise found and done after the colon following the key" in {
+  it should "only raise found after the colon, and done after the value" in {
     test(new Parser("temperature")) { c =>
       // Word 1: { "tempe  -> key only partially seen
       sendWord(c, """{ "tempe""")
@@ -46,6 +71,11 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       sendWord(c, """rature":""")
       waitUntilIdle(c)
       c.io.found.expect(true.B)
+      c.io.done.expect(false.B)
+
+      // Word 3: the value ends at '}'
+      sendWord(c, """ 25 }   """)
+      waitUntilIdle(c)
       c.io.done.expect(true.B)
     }
   }
@@ -181,6 +211,33 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       sendJson(c, """{ "a": { "b": [1, 2] }, "c": 3 }""")
       c.io.found.expect(false.B)
       c.io.done.expect(true.B)
+    }
+  }
+
+  it should "return a number value" in {
+    test(new Parser("temperature")) { c =>
+      assert(readValue(c, exampleJson) == "25")
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "return a string value with its quotes" in {
+    test(new Parser("You found me")) { c =>
+      assert(readValue(c, """{ "You found me": "Hidden value discovered!" }""") == "\"Hidden value discovered!\"")
+    }
+  }
+
+  it should "not end a string value at a comma, brace or escaped quote" in {
+    test(new Parser("note")) { c =>
+      val value = readValue(c, """{ "note": "a, b} \"c\" d", "x": 1 }""")
+      assert(value == """"a, b} \"c\" d"""")
+    }
+  }
+  
+  it should "return nothing when the key is missing" in {
+    test(new Parser("temperature")) { c =>
+      assert(readValue(c, """{ "humidity": 60 }""") == "")
+      c.io.found.expect(false.B)
     }
   }
 }

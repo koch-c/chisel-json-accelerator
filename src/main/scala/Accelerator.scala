@@ -19,6 +19,7 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
   parser.io.in.bits := streamer.io.out.bits
   streamer.io.out.ready := Mux(start, parser.io.in.ready, false.B)
   parser.io.in.valid := streamer.io.out.valid && start
+  parser.io.value.ready := true.B // value is not sent anywhere yet (UART later)
 
   val found = parser.io.found
   def is_done(bit: Bool) = parser.io.done && bit
