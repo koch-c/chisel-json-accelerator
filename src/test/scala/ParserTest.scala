@@ -100,6 +100,36 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "find a key within a nested JSON" in {
+    val deepJson =
+      """{
+        |  "nebula": {
+        |    "x7q_pulse": {
+        |      "crystal_node": {
+        |        "You found me": "Hidden value discovered!",
+        |        "flux_rate": 73,
+        |        "active": true
+        |      },
+        |      "orbit": "silver"
+        |    },
+        |    "drift": 42
+        |  },
+        |  "vortex": {
+        |    "kappa_91": {
+        |      "signal": {
+        |        "frequency": 8.62,
+        |        "status": "stable"
+        |      }
+        |    }
+        |  }
+        |}""".stripMargin
+    test(new Parser("You found me")) { c =>
+      sendJson(c, deepJson)
+      c.io.found.expect(true.B)
+      c.io.done.expect(true.B)
+    }
+  }
+
   it should "only be done when the outermost object closes" in {
     test(new Parser("temperature")) { c =>
       sendJson(c, """{ "a": { "b": [1, 2] }, "c": 3 }""")
