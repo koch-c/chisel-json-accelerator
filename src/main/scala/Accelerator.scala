@@ -10,7 +10,7 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
   })
 
   val parser = Module(new Parser(key))
-  val streamer = Module(new Streamer(json))
+  val streamer = Module(new Streamer())
   val debouncer = Module(new Debouncer(debounce))
   debouncer.io.in := io.button
   val start = RegInit(false.B)

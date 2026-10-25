@@ -3,8 +3,6 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
 class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
-
-
   // Simulate the parser has processed all 8 chars of the current word
   def waitUntilIdle(c: Streamer): Unit = {
     c.io.out.ready.poke(false.B)
@@ -17,54 +15,40 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
     for ((char, i) <- word.zipWithIndex) c.io.out.bits(i).expect(char.toInt.U)
   }
 
+  "Streamer" should "collect eight received bytes into one word" in {
+  test(new Streamer) { c =>
+    c.io.in.valid.poke(false.B)
+    c.io.in.bits.poke(0.U)
+    c.io.out.ready.poke(false.B)
 
-  "Streamer" should "send 5 words" in {
-    test(new Streamer("""{ "temperature": 25, "humidity": 60 }""")) { c =>
-        validateWord(c, """{ "tempe""")
+    for ((char, index) <- "abcdefgh".zipWithIndex) {
+      c.io.in.bits.poke(char.toInt.U)
+      c.io.in.valid.poke(true.B)
+      c.io.in.ready.expect(true.B)
+      c.clock.step() // Accept this byte
 
-        waitUntilIdle(c)
-        validateWord(c, """rature":""")
-
-        waitUntilIdle(c)
-        validateWord(c, """ 25, "hu""")
-
-        waitUntilIdle(c)
-        validateWord(c, """midity":""")
-        
-        waitUntilIdle(c)
-        validateWord(c, """ 60 }   """)
-
-        c.clock.step(1)
+      if (index < 7) {
         c.io.out.valid.expect(false.B)
-
-
+      }
     }
-  }
 
-  // 64 chars = exactly 8 words, so currWord is 3 bits and wraps from 7 back to 0
-  // after the last word. done must still stop the Streamer from sending word 0 again.
-  it should "stop after the last word when the word count is a power of two" in {
-    val json = """{ "temperature": 25, "humidity": 60, "pressure": 1013, "id": 7 }"""
-    require(json.length == 64)
+    c.io.in.valid.poke(false.B)
 
-    test(new Streamer(json)) { c =>
-        c.io.out.valid.expect(true.B)
-        validateWord(c, """{ "tempe""")
-
-        for (word <- Seq("""rature":""", """ 25, "hu""", """midity":""", """ 60, "pr""",
-                         """essure":""", """ 1013, """", """id": 7 }""")) {
-          waitUntilIdle(c)
-          c.io.out.valid.expect(true.B)
-          validateWord(c, word)
-        }
-
-        // Hand over the last word, then keep ready high so any extra word would be taken
-        c.io.out.ready.poke(true.B)
-        for (_ <- 0 until 20) {
-          c.clock.step(1)
-          c.io.out.valid.expect(false.B)
-        }
+    // A complete word is available, but the consumer is stalled.
+    for (_ <- 0 until 3) {
+      c.io.out.valid.expect(true.B)
+      for ((char, index) <- "abcdefgh".zipWithIndex) {
+        c.io.out.bits(index).expect(char.toInt.U)
+      }
+      c.clock.step()
     }
+
+    // Allow the consumer to take the word.
+    c.io.out.ready.poke(true.B)
+    c.clock.step()
+    c.io.out.valid.expect(false.B)
   }
+}
+
 
 }
