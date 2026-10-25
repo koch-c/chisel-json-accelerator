@@ -3,6 +3,7 @@ import chisel3.util.{Decoupled, log2Ceil}
 
 /** Accepts vectors of eight input bytes for JSON parsing.
   * Handles nested objects/arrays and escaped characters in strings.
+  * Maybe look at the max depth, if we feel like 32 is overkill
   */
 class Parser(key: String, maxDepth: Int = 32) extends Module {
   val io = IO(new Bundle {
@@ -19,7 +20,7 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
   val busy = RegInit(false.B)
 
   val inString = RegInit(false.B) // reading str
-  val escaped  = RegInit(false.B) // previous char in str was a backslash
+  val escaped  = RegInit(false.B) // previous char in str was a backslash (edgecase)
   val depth    = RegInit(0.U(log2Ceil(maxDepth + 1).W)) // nesting level of {} and []
   val charsMatched      = RegInit(0.U(8.W)) // how many key chars matched
   val isMatching = RegInit(false.B) // current string still matches key
