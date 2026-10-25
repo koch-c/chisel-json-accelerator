@@ -63,4 +63,48 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.found.expect(false.B)
     }
   }
+
+  it should "keep searching after a nested object closes" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """{ "meta": { "id": 1 }, "temperature": 25 }""")
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "find a key inside a nested object" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """{ "sensor": { "temperature": 25 } }""")
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "find a key inside an array of objects" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """[ { "humidity": 60 }, { "temperature": 25 } ]""")
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "not end a string on an escaped quote" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """{ "note": "say \"temperature\": hi", "humidity": 60 }""")
+      c.io.found.expect(false.B)
+      c.io.done.expect(true.B)
+    }
+  }
+
+  it should "handle an escaped backslash at the end of a string" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """{ "path": "C:\\", "temperature": 25 }""")
+      c.io.found.expect(true.B)
+    }
+  }
+
+  it should "only be done when the outermost object closes" in {
+    test(new Parser("temperature")) { c =>
+      sendJson(c, """{ "a": { "b": [1, 2] }, "c": 3 }""")
+      c.io.found.expect(false.B)
+      c.io.done.expect(true.B)
+    }
+  }
 }

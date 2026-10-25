@@ -1,8 +1,10 @@
 import chisel3._
-import chisel3.util.Decoupled
+import chisel3.util.{Decoupled, log2Ceil}
 
-/** Accepts vectors of eight input bytes for JSON parsing. */
-class Parser(key: String) extends Module {
+/** Accepts vectors of eight input bytes for JSON parsing.
+  * Handles nested objects/arrays and escaped characters in strings.
+  */
+class Parser(key: String, maxDepth: Int = 32) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(Vec(8, UInt(8.W))))
     val found    = Output(Bool())
@@ -17,6 +19,8 @@ class Parser(key: String) extends Module {
   val busy = RegInit(false.B)
 
   val inString = RegInit(false.B) // reading str
+  val escaped  = RegInit(false.B) // previous char in str was a backslash
+  val depth    = RegInit(0.U(log2Ceil(maxDepth + 1).W)) // nesting level of {} and []
   val charsMatched      = RegInit(0.U(8.W)) // how many key chars matched
   val isMatching = RegInit(false.B) // current string still matches key
   val hit      = RegInit(false.B) // string matches the key
@@ -38,23 +42,30 @@ class Parser(key: String) extends Module {
 
     when(!done) {
       when(inString) {
-        when(c === ch('"')) { 
+        when(c === ch('"') && !escaped) {
           inString := false.B
           hit := isMatching && charsMatched === key.length.U
-        }.elsewhen(isMatching && charsMatched < key.length.U && c === searchKey(charsMatched)) {
-          charsMatched := charsMatched + 1.U
         }.otherwise {
-          isMatching := false.B
+          escaped := c === ch('\\') && !escaped // \\ escapes itself
+          when(isMatching && charsMatched < key.length.U && c === searchKey(charsMatched)) {
+            charsMatched := charsMatched + 1.U
+          }.otherwise {
+            isMatching := false.B
+          }
         }
-      }.elsewhen(c === ch('"')) { 
+      }.elsewhen(c === ch('"')) {
         inString := true.B
+        escaped := false.B
         charsMatched := 0.U
         isMatching := true.B
-      }.elsewhen(c === ch(':') && hit) {
+      }.elsewhen(c === ch(':') && hit) { // only keys are followed by ':'
         found := true.B
         done := true.B
-      }.elsewhen(c === ch('}')) { 
-        done := true.B
+      }.elsewhen(c === ch('{') || c === ch('[')) {
+        depth := depth + 1.U
+      }.elsewhen(c === ch('}') || c === ch(']')) {
+        depth := depth - 1.U
+        when(depth === 1.U) { done := true.B } // closed the outermost object/array
       }
     }
   }
@@ -65,8 +76,7 @@ class Parser(key: String) extends Module {
 
 //future?
 //Buffer for longer keys (Dynamic)
-//Ability to distinguish between keys and values 
-//(maybe flags based on characters ":" "{}")
-//Should handle nested JSON files
+//Match only at a given depth / full paths (e.g. device.location.latitude)
+//Flag an error when depth exceeds maxDepth or brackets are unbalanced
 
 //Example JSON { "temperature": 25, "humidity": 60 }
