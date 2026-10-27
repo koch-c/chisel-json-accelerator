@@ -6,7 +6,7 @@
 - _The Accelerator:_ A parallel stream-based JSON parser that evaluates incoming byte streams simultaneously. It can identify structural tokens ({, }, [, ], :, ,) and extract specific key-value pairs on the fly without building heavy DOM trees in memory.
 - _Why Chisel Fits:_ You can write a parameterized generator that takes the target key string length and maximum expected nesting depth as Scala constructor parameters, emitting optimized finite state machines (FSMs) and parallel comparator trees.
 
-# MVP
+# MVP 1
 
 A parameterized Chisel-generated streaming JSON parser that accepts a restricted JSON object, searches for one compile-time-selected key, and lights an LED when that key is found.
 
@@ -17,6 +17,14 @@ The JSON file used in the MVP will be
 ```
 
 Could be cool to hit ~4 Bytes / Cycle parsing.
+
+# MVP 2
+
+Build on top of MVP 1 because we found MVP 1 to be too simple. This MVP 2 has UART support and can parse complex JSON files like:
+```json
+{"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
+```
+the JSON file is sent over UART, and the board either responds with `FOUND`, the associated value with the key, and a green LED, or it responds with `NOT_FOUND` and a red LED.
 
 ## Post MVP features
 
