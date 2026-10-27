@@ -21,19 +21,24 @@ class Accelerator(key: String, clockHz: Int = 100_000_000, baudRate: Int = 115_2
   parser.io.in <> streamer.io.out
   io.uartTx := transmitter.io.tx
 
-  // Parser results remain latched until reset. Hold each response byte until
-  // TX accepts it, and never restart the response while done stays high.
-  val foundReply = "FOUND\n"
+  // Send the raw JSON value first, then a newline-delimited status. The parser
+  // stalls under UART TX backpressure so no extracted value bytes are lost.
+  val foundReply = "\nFOUND\n"
   val missingReply = "NOT_FOUND\n"
-  val foundBytes = VecInit(foundReply.padTo(missingReply.length, ' ').map(_.toInt.U(8.W)))
-  val missingBytes = VecInit(missingReply.map(_.toInt.U(8.W)))
-  val replyIndex = RegInit(0.U(log2Ceil(missingReply.length).W))
+  val replySize = math.max(foundReply.length, missingReply.length)
+  val foundBytes = VecInit(foundReply.padTo(replySize, ' ').map(_.toInt.U(8.W)))
+  val missingBytes = VecInit(missingReply.padTo(replySize, ' ').map(_.toInt.U(8.W)))
+  val replyIndex = RegInit(0.U(log2Ceil(replySize).W))
   val replySent = RegInit(false.B)
   val replyLength = Mux(parser.io.found, foundReply.length.U, missingReply.length.U)
 
-  transmitter.io.in.valid := parser.io.done && !replySent
-  transmitter.io.in.bits := Mux(parser.io.found, foundBytes(replyIndex), missingBytes(replyIndex))
-  when(transmitter.io.in.fire) {
+  val sendingValue = parser.io.value.valid
+  val sendingReply = parser.io.done && !replySent
+  transmitter.io.in.valid := sendingValue || sendingReply
+  transmitter.io.in.bits := Mux(sendingValue, parser.io.value.bits,
+    Mux(parser.io.found, foundBytes(replyIndex), missingBytes(replyIndex)))
+  parser.io.value.ready := transmitter.io.in.ready && !parser.io.done
+  when(transmitter.io.in.fire && sendingReply) {
     when(replyIndex === replyLength - 1.U) {
       replySent := true.B
     }.otherwise {
