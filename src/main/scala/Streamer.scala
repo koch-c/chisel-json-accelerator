@@ -7,17 +7,33 @@ class Streamer() extends Module {
         val in = Flipped(Decoupled(UInt(8.W)))
         val out = Decoupled(Vec(8, UInt(8.W)))
     })  
-    val count = RegInit(0.U(4.W))
+    val count = RegInit(0.U(3.W))
     val currentWord = RegInit(VecInit(Seq.fill(8)(0.U(8.W))))
     val full = RegInit(false.B)
+    val padding = RegInit(false.B)
+    
 
-
-    when(io.in.fire){
-      currentWord(count) := io.in.bits
+    when(padding){
+      currentWord(count) := 32.U
       when(count === 7.U){
-        full := true.B
-      } .elsewhen(count < 7.U) {
-       count := count + 1.U
+          full := true.B
+          padding := false.B
+        } .elsewhen(count < 7.U) {
+          count := count + 1.U
+        }
+    }.elsewhen(io.in.fire){
+      when(io.in.bits === 10.U){ // meaning the 0x0A: newline character.
+        when(count =/= 0.U){
+          padding := true.B
+        }
+      } .otherwise{
+        currentWord(count) := io.in.bits
+        when(count === 7.U){
+          full := true.B
+          padding := false.B
+        } .elsewhen(count < 7.U) {
+          count := count + 1.U
+        }
       }
     }
 
@@ -27,7 +43,7 @@ class Streamer() extends Module {
     }
 
 
-    io.in.ready := !full
+    io.in.ready := !full && !padding
     io.out.bits := currentWord
     io.out.valid := full
 }

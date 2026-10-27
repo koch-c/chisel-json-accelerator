@@ -49,6 +49,52 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.out.valid.expect(false.B)
   }
 }
+  it should "pad a small JSON word when a newline is received" in {
+    test(new Streamer).withAnnotations(Seq(WriteVcdAnnotation))  { c =>
+      val json = "{\"a\":1}"
+      c.io.in.valid.poke(false.B)
+      c.io.in.bits.poke(0.U)
+      c.io.out.ready.poke(false.B)
+
+      for (char <- json) {
+        c.io.in.valid.poke(true.B)
+        c.io.in.bits.poke(char.toInt.U)
+        c.io.in.ready.expect(true.B)
+        c.clock.step()
+      }
+
+      // Silence alone must not flush the seven buffered bytes.
+      c.io.in.valid.poke(false.B)
+      c.clock.step(3)
+      c.io.out.valid.expect(false.B)
+
+      c.io.in.valid.poke(true.B)
+      c.io.in.bits.poke('\n'.toInt.U)
+      c.io.in.ready.expect(true.B)
+      c.clock.step() // Accept the newline, then pad on the next cycle.
+      c.io.in.valid.poke(false.B)
+      c.io.in.ready.expect(false.B)
+      c.io.out.valid.expect(false.B)
+      c.clock.step()
+
+      // The newline is replaced by a space; hold the result under backpressure.
+      for (_ <- 0 until 3) {
+        c.io.out.valid.expect(true.B)
+        c.io.in.ready.expect(false.B)
+        validateWord(c, json + " ")
+        c.clock.step()
+      }
+
+      c.io.out.ready.poke(true.B)
+      c.clock.step()
+      c.io.in.ready.expect(true.B)
+      for (_ <- 0 until 10) {
+        c.io.out.valid.expect(false.B)
+        c.clock.step()
+      }
+    }
+  }
+
   it should "consume and refill words from the temperature and humidity JSON" in {
     test(new Streamer).withAnnotations(Seq(WriteVcdAnnotation)) { c =>
       val json = "{ \"temperature\": 25, \"humidity\": 60 }"
