@@ -1,9 +1,11 @@
 import chisel3._
-import chisel3.util.Decoupled
+import chisel3.util.log2Ceil
 
-class Accelerator(key: String, json: String, debounce: Int) extends Module {
+/** Parses one space-padded UART document per reset and reports the result. */
+class Accelerator(key: String, clockHz: Int = 100_000_000, baudRate: Int = 115_200) extends Module {
   val io = IO(new Bundle {
-    val button = Input(Bool())
+    val uartRx = Input(Bool())
+    val uartTx = Output(Bool())
     val LED16_R = Output(Bool())
     val LED16_G = Output(Bool())
     val LED16_B = Output(Bool())
@@ -11,14 +13,33 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
 
   val parser = Module(new Parser(key))
   val streamer = Module(new Streamer())
-  val debouncer = Module(new Debouncer(debounce))
-  debouncer.io.in := io.button
-  val start = RegInit(false.B)
-  start := Mux(debouncer.io.fire, true.B, start)
+  val receiver = Module(new UartRx(clockHz, baudRate))
+  val transmitter = Module(new UartTx(clockHz, baudRate))
 
-  parser.io.in.bits := streamer.io.out.bits
-  streamer.io.out.ready := Mux(start, parser.io.in.ready, false.B)
-  parser.io.in.valid := streamer.io.out.valid && start
+  receiver.io.rx := io.uartRx
+  streamer.io.in <> receiver.io.out
+  parser.io.in <> streamer.io.out
+  io.uartTx := transmitter.io.tx
+
+  // Parser results remain latched until reset. Hold each response byte until
+  // TX accepts it, and never restart the response while done stays high.
+  val foundReply = "FOUND\n"
+  val missingReply = "NOT_FOUND\n"
+  val foundBytes = VecInit(foundReply.padTo(missingReply.length, ' ').map(_.toInt.U(8.W)))
+  val missingBytes = VecInit(missingReply.map(_.toInt.U(8.W)))
+  val replyIndex = RegInit(0.U(log2Ceil(missingReply.length).W))
+  val replySent = RegInit(false.B)
+  val replyLength = Mux(parser.io.found, foundReply.length.U, missingReply.length.U)
+
+  transmitter.io.in.valid := parser.io.done && !replySent
+  transmitter.io.in.bits := Mux(parser.io.found, foundBytes(replyIndex), missingBytes(replyIndex))
+  when(transmitter.io.in.fire) {
+    when(replyIndex === replyLength - 1.U) {
+      replySent := true.B
+    }.otherwise {
+      replyIndex := replyIndex + 1.U
+    }
+  }
 
   val found = parser.io.found
   def is_done(bit: Bool) = parser.io.done && bit
@@ -30,7 +51,7 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
 
 object GenerateAccelerator extends App {
   emitVerilog(
-    new Accelerator("temperature","{ \"temperature\": 25, \"humidity\": 60 }", 2_000_000),
+    new Accelerator("temperature"),
     Array("--target-dir", "generated")
   )
 }
