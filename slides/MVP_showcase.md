@@ -24,6 +24,13 @@ style: |
   .example pre {
     font-size: 22px;
   }
+  .demo-inputs pre {
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .demo-result img {
+    width: 100%;
+  }
   .kanban img {
     max-height: 490px;
   }
@@ -84,6 +91,47 @@ style: |
 
 ---
 
+# FPGA demonstration
+
+```sh
+picocom -b 115200 --flow n --parity n --databits 8 --stopbits 1 /dev/ttyUSB1
+```
+
+<div class="columns">
+<div class="demo-inputs">
+
+### MVP 1 input
+```json
+{ "temperature": 25, "humidity": 60 }
+```
+
+### MVP 2 input
+```json
+{
+  "system": {
+    "board": "Nexys 4 DDR", "location": "lab bench",
+    "firmware": { "version": "1.2.3", "build": 20261027 },
+    "sensors": [
+      { "name": "humidity", "value": 60 },
+      { "name": "pressure", "value": 1013 },
+      { "temperature": "twenty-five degrees" }
+    ],
+    "notes": "UART streaming JSON test"
+  },
+  "enabled": true
+}
+```
+
+</div>
+<div class="demo-result">
+
+![UART output](../images/found_example_2.png)
+
+</div>
+</div>
+
+---
+
 # Agile workflow
 
 <div class="columns">
@@ -100,3 +148,12 @@ style: |
 
 </div>
 </div>
+
+---
+
+# Next steps
+
+- Build a library that lets Scala interact with the parser.
+- Add support for JSONPath.
+- Create a golden model for testing.
+- Increase the number of bytes parsed per second.
