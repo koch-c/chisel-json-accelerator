@@ -36,8 +36,17 @@ Could be cool to hit ~4 Bytes / Cycle parsing.
   - Process 4, 8, or 16 input bytes per cycle.
   - Generate parallel structural-character detectors.
 
+## UART usage on Nexys 4 DDR
+
+The accelerator receives one JSON document per reset at **115200 baud, 8N1**.
+Pad the document with spaces to a multiple of eight bytes before sending it.
+The target key is `temperature`; nested objects and arrays are supported.
+
+When found, UART returns the raw JSON value followed by `FOUND` on its own line;
+for example, a temperature of `25` returns `25\nFOUND\n`. A missing key returns
+`NOT_FOUND\n`. Press the center reset button before sending another document.
+
 # Sources
 - [Research Paper on FPGA JSON Parsing Architecture](https://findit.dtu.dk/en/catalog/65767b9e89635a1313f90e45?single_revert=%2Fen%2Fcatalog%3Fq%3DSPEAR-JSON%253A%2BSelective%2BParsing%2Bof%2BJSON%2Bto%2BEnable%2BAccelerated%2BStream%2BProcessing%2Bon%2BFPGAs%26show_single%3Doff)
 - [In depth guide to building parsers](https://www.booleanworld.com/building-recursive-descent-parsers-definitive-guide/)
 - [JSONPath](https://goessner.net/articles/JsonPath/)
-

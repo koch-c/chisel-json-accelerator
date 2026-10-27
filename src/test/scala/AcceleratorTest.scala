@@ -55,13 +55,14 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   val documents = Seq(
-    ("matching key", """{ "temperature": 25, "humidity": 60 }""", true),
-    ("missing key", """{ "humidity": 60 }""", false),
-    ("long matching input", """{"padding":"""" + ("x" * 257) + """","temperature":25}""", true),
-    ("long missing input", """{"padding":"""" + ("x" * 257) + """","humidity":60}""", false)
+    ("matching key", """{ "temperature": 25, "humidity": 60 }""", true, "25\nFOUND\n"),
+    ("missing key", """{ "humidity": 60 }""", false, "NOT_FOUND\n"),
+    ("long matching input", """{"padding":"""" + ("x" * 257) + """","temperature":25}""", true, "25\nFOUND\n"),
+    ("long missing input", """{"padding":"""" + ("x" * 257) + """","humidity":60}""", false, "NOT_FOUND\n"),
+    ("nested string value", """{"meta":{"temperature":"twenty-five"}}""", true, "\"twenty-five\"\nFOUND\n")
   )
 
-  for (cyclesPerBit <- Seq(8, 10); (label, json, found) <- documents) {
+  for (cyclesPerBit <- Seq(8, 10); (label, json, found, response) <- documents) {
     "Accelerator" should s"report $label exactly once with $cyclesPerBit clocks per bit" in {
       test(new Accelerator(key, cyclesPerBit * 10, 10)) { c =>
         initialize(c)
@@ -72,7 +73,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
         fork {
           send(c, padded, cyclesPerBit)
         }.fork {
-          receive(c, if (found) "FOUND\n" else "NOT_FOUND\n", cyclesPerBit,
+          receive(c, response, cyclesPerBit,
             (padded.length + 12) * 10 * cyclesPerBit)
         }.join()
         c.clock.step()
@@ -109,7 +110,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       fork {
         send(c, json.padTo((json.length + 7) / 8 * 8, ' '), cyclesPerBit)
       }.fork {
-        receive(c, "FOUND\n", cyclesPerBit, 3000)
+        receive(c, "1\nFOUND\n", cyclesPerBit, 3000)
       }.join()
       expectLeds(c, found = true)
       expectQuiet(c, 1000)
