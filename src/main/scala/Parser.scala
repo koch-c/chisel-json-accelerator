@@ -3,8 +3,8 @@ import chisel3.util.{Decoupled, log2Ceil}
 
 /** Accepts vectors of eight input bytes for JSON parsing.
   * Handles nested objects/arrays and escaped characters in strings.
-  * Maybe look at the max depth, if we feel like 32 is overkill
   * After the key is found, the bytes of its value are sent out on io.value.
+  * Maybe look at the max depth, if we feel like 32 is overkill
   */
 class Parser(key: String, maxDepth: Int = 32) extends Module {
   val io = IO(new Bundle {
@@ -92,8 +92,8 @@ class Parser(key: String, maxDepth: Int = 32) extends Module {
 }
 
 
-//future?
-//Buffer for longer keys (Dynamic)
+
+
 //Match only at a given depth / full paths (e.g. device.location.latitude)
 //Flag an error when depth exceeds maxDepth or brackets are unbalanced
 //Unicode escapes are not decoded, keys are compared byte by byte as written in the file

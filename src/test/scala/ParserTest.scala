@@ -240,4 +240,29 @@ class ParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.found.expect(false.B)
     }
   }
+
+  it should "return an object value including its nested braces" in {
+    test(new Parser("location")) { c =>
+      val value = readValue(c, """{ "location": { "lat": 55.7, "pos": { "x": 1 } }, "id": 3 }""")
+      assert(value == """{"lat":55.7,"pos":{"x":1}}""")
+    }
+  }
+
+  it should "return an object value that is the last member" in {
+    test(new Parser("location")) { c =>
+      assert(readValue(c, """{ "id": 3, "location": { "lat": 55.7 } }""") == """{"lat":55.7}""")
+    }
+  }
+
+  it should "return an array value" in {
+    test(new Parser("readings")) { c =>
+      assert(readValue(c, """{ "readings": [ 1, [2, 3], { "a": 4 } ], "id": 3 }""") == """[1,[2,3],{"a":4}]""")
+    }
+  }
+
+  it should "not restart the value when it contains the same key" in {
+    test(new Parser("a")) { c =>
+      assert(readValue(c, """{ "a": { "a": 1 }, "b": 2 }""") == """{"a":1}""")
+    }
+  }
 }
