@@ -30,7 +30,11 @@ class Accelerator(key: String, json: String, debounce: Int) extends Module {
 
 object GenerateAccelerator extends App {
   emitVerilog(
-    new Accelerator("temperature","{ \"temperature\": 25, \"humidity\": 60 }", 2_000_000),
+    new Accelerator(
+      "temperature",
+      "{ \"temperature\": 25, \"humidity\": 60 }",
+      2_000_000
+    ),
     Array("--target-dir", "generated")
   )
 }
