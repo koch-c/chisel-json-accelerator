@@ -9,13 +9,18 @@ object SymbolKind extends ChiselEnum {
 }
 
 /** One symbol for the pushdown automaton. */
-class JsonSymbol(numKeys: Int, addrWidth: Int) extends Bundle {
+class JsonSymbol(numKeys: Int, addrWidth: Int = 12) extends Bundle {
   val kind  = SymbolKind()
   val keyId = UInt(log2Ceil(numKeys max 2).W) // which of the path keys, only valid for Key
-  val addr  = UInt(addrWidth.W) // byte position in the stream, Key uses its closing quote
+  val addr  = UInt(addrWidth.W) // input buffer byte address, Key uses its closing quote
 }
 
-class Lexer(keys: Seq[String], maxDepth: Int = 32, addrWidth: Int = 32) extends Module {
+/** addr is the byte address of c in the input buffer (512 words of 8 bytes).
+  * Bits 11-3 are the word address, bits 2-0 the byte offset, so it can be
+  * passed on to the attribute loader as is. It wraps after byte 4095,
+  * the same way the buffer is written.
+  */
+class Lexer(keys: Seq[String], maxDepth: Int = 32, addrWidth: Int = 12) extends Module {
   require(keys.nonEmpty && keys.distinct.length == keys.length, "keys must be unique")
   require(maxDepth >= 2)
 

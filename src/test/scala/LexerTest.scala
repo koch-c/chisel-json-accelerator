@@ -102,6 +102,15 @@ class LexerSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "wrap the address after the last buffer byte" in {
+    test(new Lexer(keys)) { c =>
+      c.clock.setTimeout(0) // the spaces give no symbols for 4096 cycles
+      // 4096 spaces fill the whole buffer, so the next byte is at address 0 again
+      val json = " " * 4096 + """{"id":1}"""
+      assert(lex(c, json, keys) == Seq("ObjOpen@0", "id@4", "Colon@5", "ObjClose@7"))
+    }
+  }
+
   it should "lex bytes coming through the Streamer" in {
     test(new StreamerLexer(keys)) { c =>
       val bytes = record.padTo((record.length + 7) / 8 * 8, ' ')
@@ -126,7 +135,7 @@ class LexerSpec extends AnyFlatSpec with ChiselScalatestTester {
 class StreamerLexer(keys: Seq[String]) extends Module {
   val io = IO(new Bundle {
     val in  = Flipped(chisel3.util.Decoupled(UInt(8.W)))
-    val out = chisel3.util.Decoupled(new JsonSymbol(keys.length, 32))
+    val out = chisel3.util.Decoupled(new JsonSymbol(keys.length))
   })
   val streamer = Module(new Streamer())
   val lexer    = Module(new Lexer(keys))
