@@ -78,16 +78,36 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
         waitFor(c)(c.io.out.valid.peek().litToBoolean)
         c.io.in.ready.expect(true.B)
         for (_ <- 0 until 3) {
-          validateWord(c, json.padTo(8, ' '))
+          validateWord(c, (json + "\n").padTo(8, ' '))
           c.io.out.valid.expect(true.B)
           c.clock.step()
         }
         // Collection can resume before the padded word is consumed.
         send(c, "12345678\n")
-        consume(c, json.padTo(8, ' '))
+        consume(c, (json + "\n").padTo(8, ' '))
         consume(c, "12345678")
-        expectEmpty(c) // An aligned document's newline adds no extra word.
+        consume(c, "\n".padTo(8, ' ')) // Aligned data uses a newline-only word.
+        expectEmpty(c)
       }
+    }
+  }
+
+  it should "preserve a newline in byte 7 of a completed word" in {
+    test(new Streamer) { c =>
+      initialize(c)
+      send(c, "1234567\n")
+      consume(c, "1234567\n")
+      expectEmpty(c)
+    }
+  }
+
+  it should "emit a newline-only word when the document ends on a word boundary" in {
+    test(new Streamer) { c =>
+      initialize(c)
+      send(c, "12345678\n")
+      consume(c, "12345678")
+      consume(c, "\n".padTo(8, ' '))
+      expectEmpty(c)
     }
   }
 
@@ -96,7 +116,7 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
       initialize(c)
       val json = "{ \"temperature\": 25, \"humidity\": 60 }"
       send(c, json + "\n")
-      for (word <- json.grouped(8)) consume(c, word.padTo(8, ' '))
+      for (word <- (json + "\n").grouped(8)) consume(c, word.padTo(8, ' '))
       expectEmpty(c)
     }
   }
@@ -113,7 +133,7 @@ class StreamerSpec extends AnyFlatSpec with ChiselScalatestTester {
       val json = if (document.length % 8 == 0) document + " " else document
       assert(json.length > 1024 && json.length % 8 != 0)
       val input = json + "\n"
-      val expected = json.grouped(8).map(_.padTo(8, ' ')).toVector
+      val expected = input.grouped(8).map(_.padTo(8, ' ')).toVector
       var sent = 0
       var received = 0
       var cycles = 0

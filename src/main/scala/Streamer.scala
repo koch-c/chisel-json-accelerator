@@ -23,7 +23,12 @@ class Streamer() extends Module {
     }
   }.elsewhen(io.in.fire) {
     when(io.in.bits === 10.U) { // meaning the 0x0A: newline character.
-      when(count =/= 0.U) {
+      currentWord(count) := io.in.bits
+      when(count === 7.U) {
+        padding := false.B
+        full := true.B
+      }.otherwise {
+        count := count + 1.U
         padding := true.B
       }
     }.otherwise {
