@@ -23,6 +23,7 @@ class Accelerator(key: String, clockHz: Int = 100_000_000, baudRate: Int = 115_2
 
   // Send the raw JSON value first, then a newline-delimited status. The parser
   // stalls under UART TX backpressure so no extracted value bytes are lost.
+  // FoundRply, missing reply and baudrate will break the library if changed since they need to match in Protocol.scala
   val foundReply = "\nFOUND\n"
   val missingReply = "NOT_FOUND\n"
   val replySize = math.max(foundReply.length, missingReply.length)
