@@ -2,7 +2,7 @@
 # Usage: vivado -mode batch -source fpga/program.tcl
 
 set root [file normalize [file join [file dirname [info script]] ..]]
-set bit [file join $root build vivado json_accelerator.runs impl_1 Accelerator.bit]
+set bit [file join $root build vivado json_accelerator.runs impl_1 AcceleratorTop.bit]
 
 open_hw_manager
 connect_hw_server

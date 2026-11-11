@@ -4,7 +4,7 @@
 # Batch: vivado -mode batch -source fpga/create_project.tcl              (project only)
 #        vivado -mode batch -source fpga/create_project.tcl -tclargs build  (also builds the bitstream)
 #
-# Run `sbt "runMain GenerateAccelerator"` first. Sources are added by reference,
+# Run `sbt "runMain GenerateAcceleratorTop"` first. Sources are added by reference,
 # so regenerating the Verilog is picked up on the next run without recreating the project.
 
 set root [file normalize [file join [file dirname [info script]] ..]]
@@ -12,13 +12,13 @@ set proj_dir [file join $root build vivado]
 
 create_project json_accelerator $proj_dir -part xc7a100tcsg324-1 -force
 
-set top_sv [file join $root generated Accelerator.sv]
+set top_sv [file join $root generated AcceleratorTop.sv]
 if {![file exists $top_sv]} {
-  error "$top_sv not found. Run: sbt \"runMain GenerateAccelerator\""
+  error "$top_sv not found. Run: sbt \"runMain GenerateAcceleratorTop\""
 }
 add_files -norecurse [list $top_sv]
 add_files -fileset constrs_1 -norecurse [list [file join $root Nexys4DDR_Master.xdc]]
-set_property top Accelerator [current_fileset]
+set_property top AcceleratorTop [current_fileset]
 update_compile_order -fileset sources_1
 
 if {[lsearch $argv build] >= 0} {
