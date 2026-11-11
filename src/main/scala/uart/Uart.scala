@@ -14,10 +14,3 @@ class Uart(clockHz: Int, baudRate: Int) extends Module {
   transmitter.io.in <> receiver.io.out
   io.uartTx := transmitter.io.tx
 }
-
-object GenerateUart extends App {
-  emitVerilog(
-    new Uart(100_000_000, 115_200),
-    Array("--target-dir", "generated")
-  )
-}
