@@ -23,3 +23,7 @@ project/metals.sbt
 dfx_runtime.txt
 .Xil/
 /vivado_pid*.str
+
+# Agent Settings
+/Agents
+CLAUDE.md
