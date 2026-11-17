@@ -6,7 +6,7 @@
 - _The Accelerator:_ A parallel stream-based JSON parser that evaluates incoming byte streams simultaneously. It can identify structural tokens ({, }, [, ], :, ,) and extract specific key-value pairs on the fly without building heavy DOM trees in memory.
 - _Why Chisel Fits:_ You can write a parameterized generator that takes the target key string length and maximum expected nesting depth as Scala constructor parameters, emitting optimized finite state machines (FSMs) and parallel comparator trees.
 
-# MVP
+# MVP 1
 
 A parameterized Chisel-generated streaming JSON parser that accepts a restricted JSON object, searches for one compile-time-selected key, and lights an LED when that key is found.
 
@@ -17,6 +17,14 @@ The JSON file used in the MVP will be
 ```
 
 Could be cool to hit ~4 Bytes / Cycle parsing.
+
+# MVP 2
+
+Build on top of MVP 1 because we found MVP 1 to be too simple. This MVP 2 has UART support and can parse complex JSON files like:
+```json
+{"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
+```
+the JSON file is sent over UART, and the board either responds with `FOUND`, the associated value with the key, and a green LED, or it responds with `NOT_FOUND` and a red LED.
 
 ## Post MVP features
 
@@ -36,8 +44,35 @@ Could be cool to hit ~4 Bytes / Cycle parsing.
   - Process 4, 8, or 16 input bytes per cycle.
   - Generate parallel structural-character detectors.
 
+## UART usage on Nexys 4 DDR
+
+The accelerator receives one JSON document per reset at **115200 baud, 8N1**.
+Pad the document with spaces to a multiple of eight bytes before sending it.
+The target key is `temperature`; nested objects and arrays are supported.
+
+When found, UART returns the raw JSON value followed by `FOUND` on its own line;
+for example, a temperature of `25` returns `25\nFOUND\n`. A missing key returns
+`NOT_FOUND\n`. Press the center reset button before sending another document.
+
 # Sources
 - [Research Paper on FPGA JSON Parsing Architecture](https://findit.dtu.dk/en/catalog/65767b9e89635a1313f90e45?single_revert=%2Fen%2Fcatalog%3Fq%3DSPEAR-JSON%253A%2BSelective%2BParsing%2Bof%2BJSON%2Bto%2BEnable%2BAccelerated%2BStream%2BProcessing%2Bon%2BFPGAs%26show_single%3Doff)
 - [In depth guide to building parsers](https://www.booleanworld.com/building-recursive-descent-parsers-definitive-guide/)
 - [JSONPath](https://goessner.net/articles/JsonPath/)
+# Testing the MVP
+We can test the FPGA with the following:
+```json
+{"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
+```
+Here we expect `FOUND`. Note, you must paste the text in, and then add *one* space
+
+For a json that should fail, do:
+```json
+{"meta":{"temperatura":"twenty-five"}}     
+```
+*note* remember the trailing spaces (six of them)
+
+You can connect to the FPGA with 
+```sh
+picocom -b 115200 --flow n --parity n --databits 8 --stopbits 1 /dev/ttyUSB1
+```
 

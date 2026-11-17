@@ -20,7 +20,7 @@ class Lexer(keys: Seq[String], maxDepth: Int = 32, addrWidth: Int = 32) extends 
   require(maxDepth >= 2)
 
   val io = IO(new Bundle {
-    val in    = Flipped(Decoupled(Vec(8, UInt(8.W)))) // words from the Streamer
+    val in    = Flipped(Decoupled(Vec(8, UInt(8.W)))) // words from InputFIFO
     val out   = Decoupled(new JsonSymbol(keys.length, addrWidth))
     val error = Output(Bool()) // depth overflow or unbalanced brackets, sticky
   })
