@@ -96,6 +96,35 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "match alternative paths that share a root, like $.(id | user.name)" in {
+    val config = JsonPathConfig(
+      path = Seq("id"),
+      attributeId = 4,
+      additionalPaths = Seq(Seq("user", "name"))
+    )
+    test(new PushdownAutomaton(config)) { c =>
+      val symbols = Seq(
+        TestSymbol(SymbolKind.ObjOpen, 0),
+        key(config, "id", 5),
+        TestSymbol(SymbolKind.Colon, 6),
+        TestSymbol(SymbolKind.Comma, 9),
+        key(config, "user", 16),
+        TestSymbol(SymbolKind.Colon, 17),
+        TestSymbol(SymbolKind.ObjOpen, 18),
+        key(config, "name", 26),
+        TestSymbol(SymbolKind.Colon, 27),
+        TestSymbol(SymbolKind.ObjClose, 31),
+        TestSymbol(SymbolKind.ObjClose, 32)
+      )
+
+      val (descriptors, endOfRecords) = send(c, symbols, config)
+      c.io.found.expect(true.B)
+      c.io.done.expect(true.B)
+      assert(descriptors == Seq(Result(4, 6, 3), Result(4, 27, 4)))
+      assert(endOfRecords == 1)
+    }
+  }
+
   it should "hold the loader descriptor stable while the loader is stalled" in {
     val config = JsonPathConfig(Seq("temperature"), attributeId = 3)
     test(new PushdownAutomaton(config)) { c =>
