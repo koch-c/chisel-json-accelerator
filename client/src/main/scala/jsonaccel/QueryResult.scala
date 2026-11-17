@@ -1,6 +1,6 @@
 package jsonaccel
 
-/** Objects used for saving output from the board*/
+// Objects used for saving output from the board
 sealed trait QueryResult
 
 final case class Found(value: String) extends QueryResult

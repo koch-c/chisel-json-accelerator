@@ -11,7 +11,7 @@ class AcceleratorClientSpec extends AnyFlatSpec {
   val json = """{ "temperature": 25, "humidity": 60 }"""
 
   def clientFor(transport: Transport, timeoutMillis: Int = 200): AcceleratorClient =
-    new AcceleratorClient(transport, "temperature", timeoutMillis)
+    new AcceleratorClient(transport, timeoutMillis)
 
   /** Runs `body` and returns its result with the elapsed wall-clock time. */
   def timed[A](body: => A): (A, Long) = {

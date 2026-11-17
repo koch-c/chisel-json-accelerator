@@ -7,12 +7,10 @@ import java.nio.charset.StandardCharsets
   *
   * @param transport where the bytes go. A SerialTransport for the real board,
   *   or a fake one in tests.
-  * @param key the key the bitstream was generated with. 
-  *
   * @param timeoutMillis how long to wait for a full reply.
   *
   */
-class AcceleratorClient(transport: Transport, val key: String, timeoutMillis: Int = 2000) {
+class AcceleratorClient(transport: Transport, timeoutMillis: Int = 2000) {
 
   //Sends one document and waits for the board's reply. Encodes the document with `Protocol` and write it.
   
