@@ -1,78 +1,103 @@
-# Gemini Pitch
+# JAW - JSON Accelerator in Wires
+This repo contains the Chisel code for a hardware-accelerated JSON parser that accepts [`JSONPath`](https://goessner.net/articles/JsonPath/) queries.
 
-## 1. Hardware-Accelerated JSON Parsing / Validation Engine
+## Motivation
 
-- _The Problem:_ Modern microservices and cloud infrastructure pass massive volumes of JSON telemetry, API requests, and logs. CPUs spend immense amounts of cycles sequentially branching, checking quotes, and scanning strings to parse payloads.
-- _The Accelerator:_ A parallel stream-based JSON parser that evaluates incoming byte streams simultaneously. It can identify structural tokens ({, }, [, ], :, ,) and extract specific key-value pairs on the fly without building heavy DOM trees in memory.
-- _Why Chisel Fits:_ You can write a parameterized generator that takes the target key string length and maximum expected nesting depth as Scala constructor parameters, emitting optimized finite state machines (FSMs) and parallel comparator trees.
+We wanted to create a hardware generator that could solve a problem we could all relate to. After a little bit of thinking we agreed to work on creating an accelerator that could parse JSON, since we had all worked with JSON many times before. While it might sound a bit boring to create an accelerated parser, it is nevertheless something that has a real use case. 
 
-# MVP 1
+For example, on [Cloudflare Radar](https://radar.cloudflare.com/traffic) we can see that JSON constitutes a large share of HTTP responses on Cloudflare's servers worldwide. On the 17th of November, 2026, JSON constituted `34.7%` of all HTTP responses over the past 3 months. JSON far surpasses any other kind of MIME type in HTTP responses. 
+[![Cloudflare Radar HTTP requests by response content type, showing JSON at 35.3%](images/cloudflare-radar.png)](https://radar.cloudflare.com/traffic)
 
-A parameterized Chisel-generated streaming JSON parser that accepts a restricted JSON object, searches for one compile-time-selected key, and lights an LED when that key is found.
+Google have also investigated what operations large datacenters spend a lot of resources. In the paper [*Profiling a Warehouse-Scale Computer*](https://ieeexplore.ieee.org/document/7478434/) (Kanev et al., IEEE Micro 2016) found that **22–27% of CPU cycles** in Google's fleet were spent on infrastructure operations, including protocol-buffer management. The authors of the paper identify serialization and deserialization as promising hardware-acceleration targets.
 
-The JSON file used in the MVP will be
+## Design
 
+Our design is based on the architecture introduced in [*SPEAR-JSON*](https://ieeexplore.ieee.org/document/10296352) (Hahn et al., FPL 2023). We chose to follow the design of the paper for a number of reasons:
+- **It is a hardware generator**. This design is meant to support queries that run for a long period of time. Instead of accepting arbitrary `JSONPath` queries, the design takes the query as a parameter and generates dedicated HDL tailored to the query. 
+- **It is minimal**. It strives to create an efficient and small implementation that does not use a lot of FPGA resources.
+- **It is a part in a larger machinery**. The implementation is meant to be used in a larger data pipeline that enables the implementation to ingest, parse, and return results. In our design we connect the design to our computer using UART. 
+
+The paper introduces a design that utilizes the sparsity of JSON to increase parsing throughput. Essentially it uses a `path encoder` to find relevant symbols in the JSON file, after which a `pushdown automata` matches the symbols with whatever `JSONPath` query the `FPGA` has been synthesized to parse. Consider the example below where the `JSONPath` query is: `$.(id|user.name)`
+
+![SPEAR-JSON Figure 1 Parser flow](images/SPEAR-JSON-figure-1.png)
+Figure 1 from the [*SPEAR-JSON*](https://ieeexplore.ieee.org/document/10296352) paper.
+
+Instead of considering every character of the JSON equally, we use the `path encoder` to first find all the symbols of the JSON (the small gray boxes below the JSON string). Symbols are essentially just structural characters of JSON like `,`, `}`, `:`, etc. and keys in a JSON. These symbols are fed to the `pushdown automata`, and the automata compare them one at a time with the prefix of the query the FPGA has been synthesized to match. Every time there is a match between a symbol and a prefix in the query, the `pushdown automata` pushes the prefix to its stack. In this way the `pushdown automata` can keep track of how much of a query has been matched on some path.  
+
+## Architecture
+
+The overall architecture and flow of bits is shown in the mermaid diagram below:
+
+```mermaid
+---
+config:
+  layout: elk
+  elk:
+    mergeEdges: true
+---
+flowchart LR
+    RX[UartRx] --> INPUT[InputFIFO]
+    INPUT --> LEXER[Lexer]
+    LEXER --> FIFO[ChannelFifo]
+    FIFO --> PDA[PushdownAutomaton]
+    PDA -->|Value location| LOADER[AttributeLoader]
+    INPUT --> BUFFER[InputBuffer]
+    BUFFER -->|Original value bytes| LOADER
+    LOADER --> TX[UartTx]
+```
+
+- `UartRx` receives the JSON bytes from our computer over UART and passes them to the `InputFIFO`.
+- `InputFIFO` packs the incoming bytes into 8-byte words, adapting the byte-by-byte UART input to the wider input of the `Lexer`. The same words are also written to the `InputBuffer`, so we can retrieve the original values later.
+- `Lexer` identifies structural characters, keys, and values in the JSON and turns them into symbols. These symbols, along with their positions in the input, are passed to the `ChannelFifo`.
+- `ChannelFifo` queues the symbols from the `Lexer` and packs them into batches of up to two symbols for the `PushdownAutomaton`. It buffers symbols when the automaton cannot keep up, allowing the `Lexer` to continue working until the FIFO is full rather than waiting for each symbol to be processed.
+- `PushdownAutomaton` uses a stack to keep track of the current path through the JSON and compares it with the query the FPGA has been synthesized to match. When it finds a matching value, it sends the value's location to the `AttributeLoader`.
+- `InputBuffer` stores the original JSON bytes while the symbols move through the parser. The `AttributeLoader` reads from this buffer to retrieve a matching value without having to reconstruct it from symbols.
+- `AttributeLoader` uses the location from the `PushdownAutomaton` to read the matching value from the `InputBuffer`. It then passes the original value bytes to `UartTx`.
+- `UartTx` sends the extracted value bytes back to our computer over UART, completing the flow.
+<!-- TODO: Change bullet point list to reflect parallelism in Lexer and add new components  -->
+
+## Agile Development
+We of courses implemented JAW with an Agile mindset. Every Thursday after class we had our weekly standups, where we talked about what tickets we had completed, what was blocking us, and we decided what we wanted to work on for the next spring. We organized ourselves through GitHub Projects in a kanban board
+
+![Kanban board on Github Projects](images/kanban-board.png)
+
+### CI
+We used GitHub Actions in facilitate continuous integration. We started with a simple action that ran all chisel tests:
+```yaml
+jobs:
+  test:
+    # Shortened
+      - name: Run tests
+        run: sbt test
+```
+But we later extended CI to also apply formatting checks and ensuring that the chisel code could compile to SystemVerilog:
+```yaml
+jobs:
+  test:
+    # Shortened
+      - name: Check Scala formatting
+        run: sbt "scalafmtCheckAll; scalafmtSbtCheck"
+
+      - name: Run tests
+        run: sbt test
+
+      - name: Generate top-level Verilog
+        run: |
+          sbt "runMain GenerateAcceleratorTop"
+          test -s generated/AcceleratorTop.sv
+```
+
+### Initial Design Process
+
+We adopted the mindset, **build, deploy, repeat** and in the beginning of the project we pushed for an MVP. Our first MVP was very simple. It essentially streamed a simple JSON string stored on chip, and lid an LED depending on whether or not the JSON contained the key matching a basic `JSONPath` query. It accepted JSON strings like
 ```json
 { "temperature": 25, "humidity": 60 }
 ```
+We very quickly designed, synthesized, implemented and ran the first MVP on the FPGA board. When we had accomplished the first *M*VP we moved on to a MVP 2. This MVP had UART support, so we could stream arbitrarily large JSON files to the FPGA board, and the board would reply back with value matching the configured `JSONPath` query. We also extended our support for more complex `JSONPath` queries such that we could also detect keys in nested objects like:
 
-Could be cool to hit ~4 Bytes / Cycle parsing.
-
-# MVP 2
-
-Build on top of MVP 1 because we found MVP 1 to be too simple. This MVP 2 has UART support and can parse complex JSON files like:
 ```json
 {"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
 ```
-the JSON file is sent over UART, and the board either responds with `FOUND`, the associated value with the key, and a green LED, or it responds with `NOT_FOUND` and a red LED.
 
-## Post MVP features
-
-- Multiple target keys
-  - Generate parallel comparators for several keys.
-  - Output one match bit per key.
-- Configurable key storage
-  - Store keys in registers or BRAM.
-  - Change search keys at runtime without regenerating hardware.
-- Nested JSON path matching
-  - Generate hardware for paths such as: device.location.latitude
-  - Match both keys and their nesting context.
-- Parameterized parser depth
-  - Generate depth counters and FSM states based on maxDepth.
-  - Reject documents exceeding the configured depth.
-- Parallel byte processing
-  - Process 4, 8, or 16 input bytes per cycle.
-  - Generate parallel structural-character detectors.
-
-## UART usage on Nexys 4 DDR
-
-The accelerator receives one JSON document per reset at **115200 baud, 8N1**.
-Pad the document with spaces to a multiple of eight bytes before sending it.
-The target key is `temperature`; nested objects and arrays are supported.
-
-When found, UART returns the raw JSON value followed by `FOUND` on its own line;
-for example, a temperature of `25` returns `25\nFOUND\n`. A missing key returns
-`NOT_FOUND\n`. Press the center reset button before sending another document.
-
-# Sources
-- [Research Paper on FPGA JSON Parsing Architecture](https://findit.dtu.dk/en/catalog/65767b9e89635a1313f90e45?single_revert=%2Fen%2Fcatalog%3Fq%3DSPEAR-JSON%253A%2BSelective%2BParsing%2Bof%2BJSON%2Bto%2BEnable%2BAccelerated%2BStream%2BProcessing%2Bon%2BFPGAs%26show_single%3Doff)
-- [In depth guide to building parsers](https://www.booleanworld.com/building-recursive-descent-parsers-definitive-guide/)
-- [JSONPath](https://goessner.net/articles/JsonPath/)
-# Testing the MVP
-We can test the FPGA with the following:
-```json
-{"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
-```
-Here we expect `FOUND`. Note, you must paste the text in, and then add *one* space
-
-For a json that should fail, do:
-```json
-{"meta":{"temperatura":"twenty-five"}}     
-```
-*note* remember the trailing spaces (six of them)
-
-You can connect to the FPGA with 
-```sh
-picocom -b 115200 --flow n --parity n --databits 8 --stopbits 1 /dev/ttyUSB1
-```
-
+Once we had completed the MVP 2 and made it run on the FPGA board, we processed to implement the final version of JAW. 
+<!-- TODO: describe how we first designed the first part followed by the two parsers and filtering logic -->
