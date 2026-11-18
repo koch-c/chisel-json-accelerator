@@ -9,7 +9,8 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     integer: BigInt,
     mantissa: BigInt,
     exp10: Int,
-    isFloat: Boolean
+    isFloat: Boolean,
+    overflow: Boolean
   )
 
   /** Drives the input and collects every ParsedNumber accepted on the output.
@@ -37,7 +38,8 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
           c.io.out.bits.integer.peek().litValue,
           c.io.out.bits.mantissa.peek().litValue,
           c.io.out.bits.exp10.peek().litValue.toInt,
-          c.io.out.bits.isFloat.peek().litToBoolean
+          c.io.out.bits.isFloat.peek().litToBoolean,
+          c.io.out.bits.overflow.peek().litToBoolean
         )
         stalled = 0
       } else if (valid) {
@@ -110,6 +112,7 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
                     id: Int = 0): Unit = {
     val r = d.parse(text, id)
     assert(r.id == id, s"attribute id for '$text'")
+    assert(!r.overflow, s"overflow for '$text'")
     assert(r.negative == negative, s"sign for '$text'")
     assert(r.integer == integer, s"integer part for '$text'")
     assert(r.isFloat == isFloat, s"isFloat for '$text'")
@@ -199,6 +202,19 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       val d = new Driver(c)
       val max = (BigInt(1) << 64) - 1
       check(d, s":$max", negative = false, integer = max)
+    }
+  }
+
+  it should "flag a number that does not fit" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      assert(!d.parse(":18446744073709551615").overflow, "2^64 - 1 fits")
+      assert(d.parse(":18446744073709551616").overflow, "2^64 does not fit")
+      assert(d.parse(":0.123456789012345678901234").overflow, "mantissa too long")
+      assert(!d.parse(":1e16383").overflow, "largest exponent")
+      assert(d.parse(":1e16384").overflow, "exponent too large")
+      assert(d.parse(":1e-99999999999999999999999").overflow, "exponent wraps the accumulator")
+      assert(!d.parse(":7").overflow, "flag is cleared for the next number")
     }
   }
 }

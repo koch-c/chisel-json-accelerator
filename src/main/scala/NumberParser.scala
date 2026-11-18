@@ -12,13 +12,11 @@ import chisel3.util._
 class ParsedNumber extends Bundle {
   val attributeId = UInt(8.W)
   val negative = Bool()
-  // TODO(widths): 64 bits is a placeholder. How many decimal digits fit in 64 bits,
-  // and what should happen with a number that has more digits than that?
   val integer = UInt(64.W)
   val mantissa = UInt(64.W)
-  // TODO(widths): which range of exponents do we need to represent?
   val exp10 = SInt(16.W)
   val isFloat = Bool()
+  val overflow = Bool() // the number did not fit
 }
 
 /** Parses one number attribute, one byte per cycle.
@@ -52,7 +50,7 @@ class NumberParser extends Module {
   val isPlus = char === ch('+')
   val isPoint = char === ch('.')
   val isExp = char === ch('e') || char === ch('E')
-  val isSkippable = char === ch(':') || char === ch('\t') || char === ch('\n') || char === ch('\r') || char === ch(' ') //Potentially exclude \n since accelerator might not send line endings
+  //val isSkippable = char === ch(':') || char === ch('\t') || char === ch('\n') || char === ch('\r') || char === ch(' ') //Potentially exclude \n since accelerator might not send line endings
 
   // Registers of Fig. 4(b), with the paper's names.
   val accR = RegInit(0.U(64.W))
@@ -64,6 +62,7 @@ class NumberParser extends Module {
   val isFloatR = RegInit(false.B)
   val attributeIdR = RegInit(0.U(8.W))
   val lastR = RegInit(false.B) // the attribute's final byte has been taken
+  val overflowR = RegInit(false.B)
 
   // Handshake: no new bytes while a result is waiting to be picked up.
   io.in.ready := state =/= done && !lastR
@@ -75,6 +74,7 @@ class NumberParser extends Module {
   io.out.bits.mantissa := mantissaR
   io.out.bits.exp10 := exp10R
   io.out.bits.isFloat := isFloatR
+  io.out.bits.overflow := overflowR
 
 
   // The written exponent is accumulated in accR as an unsigned value. Apply its
@@ -134,9 +134,10 @@ class NumberParser extends Module {
   // Accumulator (signal `pn` in the figure): for every digit, shift the old
   // value one decimal place and add the new digit. So it reads it left to right.
   val digit = char(3, 0) // '0'..'9' are 0x30..0x39, so the low nibble is the value
+  val accNext = (accR << 3) +& (accR << 1) +& digit
   when(io.in.fire && isDigit) {
-    // x * 10 = x * 8 + x * 2
-    accR := (accR << 3) + (accR << 1) + digit
+    accR := accNext
+    when((accNext >> 64).orR) { overflowR := true.B }
   }
 
 
@@ -153,7 +154,10 @@ class NumberParser extends Module {
     switch(state) {
       is(int) { intR := accR }
       is(fract) { mantissaR := accR }
-      is(exp) { exp10R := exp10WithExponent }
+      is(exp) {
+        exp10R := exp10WithExponent
+        when(accR(63, 14).orR) { overflowR := true.B }
+      }
     }
   }
 
@@ -167,6 +171,7 @@ class NumberParser extends Module {
     signR := false.B
     eSignR := false.B
     isFloatR := false.B
+    overflowR := false.B
   }
 
 }
