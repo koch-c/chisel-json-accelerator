@@ -91,8 +91,7 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  // Change `ignore` to `it` once TODO 1 to 3 and 7 are in place.
-  ignore should "parse a plain integer" in {
+  it should "parse a plain integer" in {
     test(new NumberParser) { c =>
       val d = new Driver(c)
       val r = d.parse(": 25", id = 3)
@@ -103,13 +102,103 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  // TODO: add a test for each step as it lands. Suggested cases:
-  //  - a negative integer                         ":-7"
-  //  - no whitespace and trailing whitespace      ":25" and ": 25  "
-  //  - a fraction                                 ": 12.34"
-  //  - an exponent with and without a sign        ":1e3", ":-1.25e+2  ", ":5E-3"
-  //  - zero and a leading-zero fraction           ":0", ":0.05"
-  //  - two attributes in a row, with different ids (is everything cleared?)
-  //  - output backpressure                        new Driver(c, stallOutput = 3)
-  //  - the largest value that fits in the integer width
+  /** Parses one attribute and checks the result. The mantissa and exponent
+    * are only checked for floats, since they are not meaningful for integers.
+    */
+  private def check(d: Driver, text: String, negative: Boolean, integer: BigInt,
+                    isFloat: Boolean = false, mantissa: BigInt = 0, exp10: Int = 0,
+                    id: Int = 0): Unit = {
+    val r = d.parse(text, id)
+    assert(r.id == id, s"attribute id for '$text'")
+    assert(r.negative == negative, s"sign for '$text'")
+    assert(r.integer == integer, s"integer part for '$text'")
+    assert(r.isFloat == isFloat, s"isFloat for '$text'")
+    if (isFloat) {
+      assert(r.mantissa == mantissa, s"mantissa for '$text'")
+      assert(r.exp10 == exp10, s"exp10 for '$text'")
+    }
+  }
+
+  it should "parse a negative integer" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":-7", negative = true, integer = 7)
+    }
+  }
+
+  it should "ignore whitespace around the number" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":25", negative = false, integer = 25)
+      check(d, ": 25  ", negative = false, integer = 25)
+      check(d, ":\t\n 42\r\n", negative = false, integer = 42)
+    }
+  }
+
+  it should "parse a fraction" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ": 12.34", negative = false, integer = 12,
+        isFloat = true, mantissa = 1234, exp10 = -2)
+    }
+  }
+
+  it should "parse zero and a fraction with leading zeros" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":0", negative = false, integer = 0)
+      check(d, ":0.05", negative = false, integer = 0,
+        isFloat = true, mantissa = 5, exp10 = -2)
+    }
+  }
+
+  it should "parse an exponent with and without a sign" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":1e3", negative = false, integer = 1,
+        isFloat = true, mantissa = 1, exp10 = 3)
+      check(d, ":5E-3", negative = false, integer = 5,
+        isFloat = true, mantissa = 5, exp10 = -3)
+      check(d, ":-1.25e+2  ", negative = true, integer = 1,
+        isFloat = true, mantissa = 125, exp10 = 0)
+    }
+  }
+
+  it should "combine the fraction count with the exponent" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":12.34e5", negative = false, integer = 12,
+        isFloat = true, mantissa = 1234, exp10 = 3)
+      check(d, ":12.34e-5", negative = false, integer = 12,
+        isFloat = true, mantissa = 1234, exp10 = -7)
+    }
+  }
+
+  it should "clear its state between attributes" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      check(d, ":-1.5e-2", negative = true, integer = 1,
+        isFloat = true, mantissa = 15, exp10 = -3, id = 1)
+      check(d, ":7", negative = false, integer = 7, id = 2)
+      check(d, ":3.5", negative = false, integer = 3,
+        isFloat = true, mantissa = 35, exp10 = -1, id = 255)
+    }
+  }
+
+  it should "hold the result stable under output backpressure" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c, stallOutput = 3)
+      check(d, ": 12.34", negative = false, integer = 12,
+        isFloat = true, mantissa = 1234, exp10 = -2, id = 4)
+      check(d, ":-7", negative = true, integer = 7, id = 5)
+    }
+  }
+
+  it should "parse the largest value that fits in 64 bits" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      val max = (BigInt(1) << 64) - 1
+      check(d, s":$max", negative = false, integer = max)
+    }
+  }
 }

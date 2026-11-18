@@ -63,9 +63,10 @@ class NumberParser extends Module {
   val eSignR = RegInit(false.B)
   val isFloatR = RegInit(false.B)
   val attributeIdR = RegInit(0.U(8.W))
+  val lastR = RegInit(false.B) // the attribute's final byte has been taken
 
   // Handshake: no new bytes while a result is waiting to be picked up.
-  io.in.ready := state =/= done
+  io.in.ready := state =/= done && !lastR
   io.out.valid := state === done
 
   io.out.bits.attributeId := attributeIdR
@@ -75,77 +76,97 @@ class NumberParser extends Module {
   io.out.bits.exp10 := exp10R
   io.out.bits.isFloat := isFloatR
 
-  // TODO 2: control path, Fig. 4(a).
-  // Fill in the transitions. The FSM should only move when a byte is actually
-  // transferred (io.in.fire).
-  // Hints:
-  //  - Each edge in the figure is labelled "characters / control signals". Start
-  //    with only the state changes and add the register updates in TODO 3 to 6.
-  //  - Compare the figure with the JSON grammar: is the sign optional? Can a
-  //    number go from `int` straight to `exp`?
-  //  - `start` also has to get past the leading ':' and whitespace.
-  switch(state) {
-    is(start) {
+
+  // The written exponent is accumulated in accR as an unsigned value. Apply its
+  // sign and add it to the fraction count that exp10R already holds.
+  val expMagnitude = accR(14, 0).zext
+  val exp10WithExponent = Mux(eSignR, exp10R - expMagnitude, exp10R + expMagnitude)
+
+// Control path based on figure 4a in the paper.
+  when(io.in.fire) {
+    switch(state) {
+      is(start) { //only move if the start of a number is registered.
+        when(isMinus) {
+          state := sign
+          signR := true.B // ps signal
+        }.elsewhen(isDigit) {
+          state := int
+        }
+      }
+      is(sign) {
+        when(isDigit) { state := int }
+      }
+      is(int) {
+        when(isPoint) {
+          state := fract
+          intR := accR // si
+          isFloatR := true.B
+        }.elsewhen(isExp) {
+          state := expSign
+          intR := accR // si
+          mantissaR := accR // sm
+          accR := 0.U // free the accumulator for the exponent
+          isFloatR := true.B
+        }
+      }
+      is(fract) {
+        when(isDigit) {
+          exp10R := exp10R - 1.S // de
+        }.elsewhen(isExp) {
+          state := expSign
+          mantissaR := accR // sm
+          accR := 0.U // free the accumulator for the exponent
+        }
+      }
+      is(expSign) {
+        // First character after 'e' needs to be a sign or the first exponent digit.
+        when(isMinus) {
+          state := exp
+          eSignR := true.B // pes
+        }.elsewhen(isPlus || isDigit) {
+          state := exp
+        }
+      }
+    }    
+  }
 
 
+  // Accumulator (signal `pn` in the figure): for every digit, shift the old
+  // value one decimal place and add the new digit. So it reads it left to right.
+  val digit = char(3, 0) // '0'..'9' are 0x30..0x39, so the low nibble is the value
+  when(io.in.fire && isDigit) {
+    // x * 10 = x * 8 + x * 2
+    accR := (accR << 3) + (accR << 1) + digit
+  }
 
-    }
-    is(sign) {
-    }
-    is(int) {
-    }
-    is(fract) {
-    }
-    is(expSign) {
-    }
-    is(exp) {
-    }
-    is(done) {
+
+  // Checks what attribute we are loading at every cycle and when the final byte have been taken.
+  when(io.in.fire) {
+    attributeIdR := io.in.bits.attributeId
+    when(io.in.bits.last) { lastR := true.B }
+  }
+
+  // When done with the last byte we go one more cycle and then store what the acc holds.
+  when(lastR) {
+    lastR := false.B
+    state := done
+    switch(state) {
+      is(int) { intR := accR }
+      is(fract) { mantissaR := accR }
+      is(exp) { exp10R := exp10WithExponent }
     }
   }
 
-  // TODO 3: accumulator (signal `pn` in the figure).
-  // For every digit, accR becomes "the old value shifted one decimal place, plus
-  // the new digit".
-  // Hints:
-  //  - What is the numeric value of the ASCII character '7'?
-  //  - Check the width of the result of a multiplication in Chisel.
-  //  - Don't forget the sign (`ps`): where is it stored?
-
-  when(io.in.fire && isDigit)
-  {
-      //When adding the digit to the accummolator we multiply by 10 and then add the digit.
-      val multiply = accR << 3.U + 2.U
-      val addDigit = multiply & char
-
-      accR = addDigit
-
+  // Result accepted: clear everything for the next number.
+  when(io.out.fire) {
+    state := start
+    accR := 0.U
+    intR := 0.U
+    mantissaR := 0.U
+    exp10R := 0.S
+    signR := false.B
+    eSignR := false.B
+    isFloatR := false.B
   }
 
-  // TODO 4: saving the accumulator (signals `si` and `sm`).
-  // On which edges is accR copied to intR, and on which to mantissaR?
-  // Hint: read the sentence about "the transition to the exponent state" in the
-  // paper. Why does accR have to be free again at that point, and why is it NOT
-  // cleared when the point is seen?
-
-  // TODO 5: fraction (signal `de`).
-  // "12.34" is accumulated as 1234. What has to happen to exp10R for each digit
-  // in `fract` so that mantissa * 10^exp10 is still 12.34?
-
-  // TODO 6: exponent (signal `pes` and the exp states).
-  // The exponent digits are accumulated in accR like any other digits.
-  // Hints:
-  //  - Where does the exponent's sign go, and when is it applied?
-  //  - The final exp10 combines two things: the fraction count from TODO 5 and
-  //    the parsed exponent. Where is the cheapest place to add them?
-
-  // TODO 7: termination and the next number.
-  //  a) The number ends on a character that has no edge in the figure, or on
-  //     the `last` byte. Which registers must be written, depending on the state
-  //     we are in at that moment?
-  //  b) There may be trailing whitespace after the number (":-1.25e+2  "). These
-  //     bytes still have to be consumed up to and including `last` before the
-  //     next attribute arrives. Decide in which state that happens.
-  //  c) Go to `done` once per attribute, and back to `start` on io.out.fire.
-  //     Which registers must be cleared before the next number?
 }
