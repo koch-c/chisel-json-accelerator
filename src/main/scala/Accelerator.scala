@@ -22,9 +22,10 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
   val lexer = withReset(recordReset) {
     Module(new Lexer(config.path.distinct, maxDepth = config.maxDepth max 2, addrWidth = 12))
   }
+  // The lexer emits up to 8 symbols per word; the PDA consumes up to 2 per cycle.
   val fifo = withReset(recordReset) {
     Module(new ChannelFifo(new JsonSymbol(config.keyIds.size, 12),
-      depth = 16, enqueueWidth = 1, dequeueWidth = 2))
+      depth = 32, enqueueWidth = 8, dequeueWidth = 2))
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
   val loader = withReset(recordReset) { Module(new AttributeLoader) }
@@ -61,12 +62,7 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
   loader.io.readData := buffer.io.readData
   loader.io.readValid := buffer.io.readValid
 
-  // Adapt the lexer's single-symbol output to the FIFO's packed interface.
-  // TODO: the lexer should be parallel and emit 8 symbols at a time.
-  fifo.io.in.valid := lexer.io.out.valid
-  fifo.io.in.bits.count := 1.U
-  fifo.io.in.bits.entries(0) := lexer.io.out.bits
-  lexer.io.out.ready := fifo.io.in.ready
+  fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
   loader.io.descriptor <> pda.io.descriptor
 
