@@ -84,8 +84,9 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   /** The 12-byte NumberSerializer frame for one number. */
   private def numberFrame(id: Int, value: BigInt, negative: Boolean = false,
-                          isFloat: Boolean = false, exp10: Int = 0): Seq[Int] = {
-    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0)
+                          isFloat: Boolean = false, exp10: Int = 0,
+                          notANumber: Boolean = false): Seq[Int] = {
+    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0) | (if (notANumber) 8 else 0)
     Seq(id, flags) ++
       (0 until 8).map(i => ((value >> (8 * i)) & 0xff).toInt) ++
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
@@ -180,6 +181,14 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
           numberFrame(0, 25, negative = true, isFloat = true, exp10 = -1) ++
           numberFrame(0, 3, isFloat = true, exp10 = 2))
       d.recordBytes("{\"v\":7}\n", numberFrame(0, 7))
+    }
+  }
+
+  it should "flag a value that is not a number" in {
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number)) { d =>
+      d.recordBytes("{\"v\": \"hot\"}\n", numberFrame(0, 0, notANumber = true))
+      d.recordBytes("{\"v\":null}\n", numberFrame(0, 0, notANumber = true))
+      d.recordBytes("{\"v\":21}\n", numberFrame(0, 21))
     }
   }
 }

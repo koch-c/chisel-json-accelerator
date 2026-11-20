@@ -10,7 +10,8 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     mantissa: BigInt,
     exp10: Int,
     isFloat: Boolean,
-    overflow: Boolean
+    overflow: Boolean,
+    notANumber: Boolean
   )
 
   /** Drives the input and collects every ParsedNumber accepted on the output.
@@ -39,7 +40,8 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
           c.io.out.bits.mantissa.peek().litValue,
           c.io.out.bits.exp10.peek().litValue.toInt,
           c.io.out.bits.isFloat.peek().litToBoolean,
-          c.io.out.bits.overflow.peek().litToBoolean
+          c.io.out.bits.overflow.peek().litToBoolean,
+          c.io.out.bits.notANumber.peek().litToBoolean
         )
         stalled = 0
       } else if (valid) {
@@ -113,6 +115,7 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     val r = d.parse(text, id)
     assert(r.id == id, s"attribute id for '$text'")
     assert(!r.overflow, s"overflow for '$text'")
+    assert(!r.notANumber, s"notANumber for '$text'")
     assert(r.negative == negative, s"sign for '$text'")
     assert(r.integer == integer, s"integer part for '$text'")
     assert(r.isFloat == isFloat, s"isFloat for '$text'")
@@ -215,6 +218,17 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(d.parse(":1e16384").overflow, "exponent too large")
       assert(d.parse(":1e-99999999999999999999999").overflow, "exponent wraps the accumulator")
       assert(!d.parse(":7").overflow, "flag is cleared for the next number")
+    }
+  }
+
+  it should "flag an attribute that is not a number" in {
+    test(new NumberParser) { c =>
+      val d = new Driver(c)
+      for (text <- Seq(": \"hello\"", ": \"abc123\"", ":true", ":null", ":{", ":[1", ":  ", ":-", ":1e",
+                       ":1.2.3", ":--5", ":1-2", ":+5", ":.5", ":0x1F")) {
+        assert(d.parse(text).notANumber, s"'$text' is not a number")
+      }
+      assert(!d.parse(":7").notANumber, "flag is cleared for the next number")
     }
   }
 }

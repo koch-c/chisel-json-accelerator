@@ -4,7 +4,8 @@ import chisel3.util._
 /** Sends one ParsedNumber as a fixed 12-byte frame.
   *
   *   byte 0       attribute id
-  *   byte 1       flags: bit 0 negative, bit 1 isFloat, bit 2 overflow
+  *   byte 1       flags: bit 0 negative, bit 1 isFloat, bit 2 overflow,
+  *                bit 3 notANumber
   *   bytes 2-9    integer, or mantissa for a float, least significant byte first
   *   bytes 10-11  exp10 in two's complement, least significant byte first
   */
@@ -28,7 +29,7 @@ class NumberSerializer extends Module {
   // Cut the number into bytes.
   when(io.in.fire) {
     val n = io.in.bits
-    val flags = Cat(0.U(5.W), n.overflow, n.isFloat, n.negative)
+    val flags = Cat(0.U(4.W), n.notANumber, n.overflow, n.isFloat, n.negative)
     val value = Mux(n.isFloat, n.mantissa, n.integer)
     val exponent = n.exp10.asUInt
     val bytes = Seq(n.attributeId, flags) ++

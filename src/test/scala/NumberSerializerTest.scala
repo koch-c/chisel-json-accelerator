@@ -5,15 +5,17 @@ import org.scalatest.flatspec.AnyFlatSpec
 class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
   /** The 12 bytes expected for a number, following the frame layout. */
   def frame(id: Int, negative: Boolean, isFloat: Boolean, overflow: Boolean,
-            value: BigInt, exp10: Int): Seq[Int] = {
-    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0) | (if (overflow) 4 else 0)
+            value: BigInt, exp10: Int, notANumber: Boolean = false): Seq[Int] = {
+    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0) | (if (overflow) 4 else 0) |
+      (if (notANumber) 8 else 0)
     Seq(id, flags) ++
       (0 until 8).map(i => ((value >> (8 * i)) & 0xff).toInt) ++
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
 
   def submit(c: NumberSerializer, id: Int, negative: Boolean, integer: BigInt,
-             mantissa: BigInt, exp10: Int, isFloat: Boolean, overflow: Boolean): Unit = {
+             mantissa: BigInt, exp10: Int, isFloat: Boolean, overflow: Boolean,
+             notANumber: Boolean = false): Unit = {
     c.io.in.ready.expect(true.B)
     c.io.in.bits.attributeId.poke(id.U)
     c.io.in.bits.negative.poke(negative.B)
@@ -22,6 +24,7 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.in.bits.exp10.poke(exp10.S)
     c.io.in.bits.isFloat.poke(isFloat.B)
     c.io.in.bits.overflow.poke(overflow.B)
+    c.io.in.bits.notANumber.poke(notANumber.B)
     c.io.in.valid.poke(true.B)
     c.clock.step()
     c.io.in.valid.poke(false.B)
@@ -94,6 +97,14 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       submit(c, id = 2, negative = true, integer = 7, mantissa = 0, exp10 = 0,
         isFloat = false, overflow = false)
       collect(c, frame(2, negative = true, isFloat = false, overflow = false, value = 7, exp10 = 0))
+    }
+  }
+
+  it should "send notANumber as flag bit 3" in {
+    test(new NumberSerializer) { c =>
+      submit(c, id = 9, negative = false, integer = 0, mantissa = 0, exp10 = 0,
+        isFloat = false, overflow = false, notANumber = true)
+      collect(c, Seq(9, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
   }
 }

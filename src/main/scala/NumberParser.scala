@@ -17,6 +17,7 @@ class ParsedNumber extends Bundle {
   val exp10 = SInt(16.W)
   val isFloat = Bool()
   val overflow = Bool() // the number did not fit
+  val notANumber = Bool() // the attribute is not a JSON number
 }
 
 /** Parses one number attribute, one byte per cycle.
@@ -50,7 +51,8 @@ class NumberParser extends Module {
   val isPlus = char === ch('+')
   val isPoint = char === ch('.')
   val isExp = char === ch('e') || char === ch('E')
- 
+  val isColon = char === ch(':')
+  val isWhitespace = char === ch(' ') || char === ch('\t') || char === ch('\n') || char === ch('\r')
 
   // Registers of Fig. 4(b), with the paper's names.
   val accR = RegInit(0.U(64.W))
@@ -63,6 +65,7 @@ class NumberParser extends Module {
   val attributeIdR = RegInit(0.U(8.W))
   val lastR = RegInit(false.B) // the attribute's final byte has been taken
   val overflowR = RegInit(false.B)
+  val notANumberR = RegInit(false.B)
 
   // Handshake: no new bytes while a result is waiting to be picked up.
   io.in.ready := state =/= done && !lastR
@@ -75,6 +78,7 @@ class NumberParser extends Module {
   io.out.bits.exp10 := exp10R
   io.out.bits.isFloat := isFloatR
   io.out.bits.overflow := overflowR
+  io.out.bits.notANumber := notANumberR
 
 
   // The written exponent is accumulated in accR as an unsigned value. Apply its
@@ -141,6 +145,18 @@ class NumberParser extends Module {
   }
 
 
+  // Which characters a number may contain at this point. Anything else means
+  // the attribute is not a number.
+  val legal = MuxLookup(state, false.B)(Seq(
+    start -> (isColon || isWhitespace || isMinus || isDigit),
+    sign -> isDigit,
+    int -> (isDigit || isPoint || isExp || isWhitespace),
+    fract -> (isDigit || isExp || isWhitespace),
+    expSign -> (isDigit || isPlus || isMinus),
+    exp -> (isDigit || isWhitespace)
+  ))
+  when(io.in.fire && !legal) { notANumberR := true.B }
+
   // Checks what attribute we are loading at every cycle and when the final byte have been taken.
   when(io.in.fire) {
     attributeIdR := io.in.bits.attributeId
@@ -158,6 +174,8 @@ class NumberParser extends Module {
         exp10R := exp10WithExponent
         when(accR(63, 14).orR) { overflowR := true.B }
       }
+      // Ended before any digit, right after a sign, or right after the 'e'.
+      is(start, sign, expSign) { notANumberR := true.B }
     }
   }
 
@@ -172,6 +190,7 @@ class NumberParser extends Module {
     eSignR := false.B
     isFloatR := false.B
     overflowR := false.B
+    notANumberR := false.B
   }
 
 }
