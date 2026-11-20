@@ -26,7 +26,7 @@ class AcceleratorTop(
 
 object GenerateAcceleratorTop extends App {
   emitVerilog(
-    new AcceleratorTop(JsonPathConfig(Seq("sensor", "temperature"))),
+    new AcceleratorTop(JsonPathConfig(Seq("sensor", "temperature")), valueType = ValueType.Number),
     Array("--target-dir", "generated")
   )
 }

@@ -50,7 +50,7 @@ class NumberParser extends Module {
   val isPlus = char === ch('+')
   val isPoint = char === ch('.')
   val isExp = char === ch('e') || char === ch('E')
-  //val isSkippable = char === ch(':') || char === ch('\t') || char === ch('\n') || char === ch('\r') || char === ch(' ') //Potentially exclude \n since accelerator might not send line endings
+ 
 
   // Registers of Fig. 4(b), with the paper's names.
   val accR = RegInit(0.U(64.W))

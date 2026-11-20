@@ -70,15 +70,38 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
   pda.io.in <> fifo.io.out
   loader.io.descriptor <> pda.io.descriptor
 
-  io.out.valid := loader.io.out.valid
-  io.out.bits := loader.io.out.bits.data
-  loader.io.out.ready := io.out.ready
+  // Output stage can choose between the raw output or a parsed number. 
+  val lastOut = config.valueType match {
+    case ValueType.Raw =>
+      io.out.valid := loader.io.out.valid
+      io.out.bits := loader.io.out.bits.data
+      loader.io.out.ready := io.out.ready
+      loader.io.out.bits.last
+    case ValueType.Number =>
+      val parser = withReset(recordReset) { Module(new NumberParser) }
+      val serializer = withReset(recordReset) { Module(new NumberSerializer) }
+      parser.io.in <> loader.io.out
+      serializer.io.in <> parser.io.out
+      io.out <> serializer.io.out
+      serializer.io.last
+  }
 
   val endSeen = RegInit(false.B)
-  val attributeBusy = RegInit(false.B)
+
+
+
+  // Attributes that have been handed to the loader but whose output has not
+  // been fully accepted yet. At most three: one each in the loader, the number
+  // parser and the serializer.
+  val pendingAttributes = RegInit(0.U(2.W))
+  val attributeStarted = loader.io.descriptor.fire
+  val attributeFinished = io.out.fire && lastOut
+  val attributeBusy = pendingAttributes =/= 0.U
+
+
   when(pda.io.endOfRecord) { endSeen := true.B }
-  when(loader.io.descriptor.fire) { attributeBusy := true.B }
-  when(loader.io.out.fire && loader.io.out.bits.last) { attributeBusy := false.B }
+  when(attributeStarted && !attributeFinished) { pendingAttributes := pendingAttributes + 1.U }
+  when(attributeFinished && !attributeStarted) { pendingAttributes := pendingAttributes - 1.U }
 
   // A closing brace may be parsed before LF arrives. Output backpressure holds
   // attributeBusy until the final byte is actually accepted by the consumer.
@@ -91,6 +114,6 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
     wordCount := 0.U
     lineStored := false.B
     endSeen := false.B
-    attributeBusy := false.B
+    pendingAttributes := 0.U
   }
 }

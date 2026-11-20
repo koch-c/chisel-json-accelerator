@@ -52,19 +52,24 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(condition, "Timed out waiting for extraction")
     }
 
-    def expect(text: String): Unit = {
-      assert(output.toSeq == text.getBytes("UTF-8").map(_ & 0xff).toSeq,
-        s"Unexpected raw output: ${output.toSeq}")
+    def expect(text: String): Unit =
+      expectBytes(text.getBytes("UTF-8").map(_ & 0xff).toSeq)
+
+    def expectBytes(bytes: Seq[Int]): Unit = {
+      assert(output.toSeq == bytes, s"Unexpected raw output: ${output.toSeq}")
       output.clear()
     }
 
-    def record(json: String, expected: String): Unit = {
+    def record(json: String, expected: String): Unit =
+      recordBytes(json, expected.getBytes("UTF-8").map(_ & 0xff).toSeq)
+
+    def recordBytes(json: String, expected: Seq[Int]): Unit = {
       val previous = completions
       send(json)
       waitFor(completions > previous)
       for (_ <- 0 until 4) tick()
       assert(completions == previous + 1, "Expected exactly one done pulse")
-      expect(expected)
+      expectBytes(expected)
     }
   }
 
@@ -75,6 +80,15 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.out.ready.poke(true.B)
       body(new Driver(c, stall))
     }
+  }
+
+  /** The 12-byte NumberSerializer frame for one number. */
+  private def numberFrame(id: Int, value: BigInt, negative: Boolean = false,
+                          isFloat: Boolean = false, exp10: Int = 0): Seq[Int] = {
+    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0)
+    Seq(id, flags) ++
+      (0 until 8).map(i => ((value >> (8 * i)) & 0xff).toInt) ++
+      (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
 
   "Accelerator" should "extract numbers and reset between matching and missing records" in {
@@ -140,6 +154,32 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.allowOutput = true
       d.waitFor(d.completions == 1)
       d.expect(":1")
+    }
+  }
+
+  it should "send a number as a binary frame and nothing for a missing key" in {
+    run(JsonPathConfig(Seq("temperature"), attributeId = 5, valueType = ValueType.Number)) { d =>
+      d.recordBytes("{\"temperature\": 25,\"humidity\":60}\n", numberFrame(5, 25))
+      d.recordBytes("{\"humidity\":60}\n", Seq.empty)
+      d.recordBytes("{\"temperature\":-1.25e+2  }\n",
+        numberFrame(5, 125, negative = true, isFloat = true, exp10 = 0))
+    }
+  }
+
+  it should "parse a number selected by a nested path" in {
+    run(JsonPathConfig(Seq("device", "location", "latitude"), valueType = ValueType.Number)) { d =>
+      d.recordBytes("{\"latitude\":0,\"device\":{\"location\":{\"latitude\": 12.34}}}\n",
+        numberFrame(0, 1234, isFloat = true, exp10 = -2))
+    }
+  }
+
+  it should "send one frame per match under output backpressure" in {
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number), stall = true) { d =>
+      d.recordBytes("{\"v\":1,\"v\":-2.5,\"v\":3e2}\n",
+        numberFrame(0, 1) ++
+          numberFrame(0, 25, negative = true, isFloat = true, exp10 = -1) ++
+          numberFrame(0, 3, isFloat = true, exp10 = 2))
+      d.recordBytes("{\"v\":7}\n", numberFrame(0, 7))
     }
   }
 }
