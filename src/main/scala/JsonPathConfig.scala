@@ -3,8 +3,12 @@ sealed trait ValueType
 object ValueType {
   /** The raw bytes from the colon up to the next ',' or '}'. */
   case object Raw extends ValueType
-  /** Parsed by NumberParser and sent as a binary frame. */
+  /** Parsed by NumberParser and sent as decimal parts: mantissa and exp10. */
   case object Number extends ValueType
+  /** Parsed by NumberParser and sent as a 32-bit two's complement integer. */
+  case object Int32 extends ValueType
+  /** Parsed by NumberParser and sent as a 64-bit two's complement integer. */
+  case object Int64 extends ValueType
 }
 
 

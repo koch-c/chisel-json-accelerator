@@ -107,4 +107,60 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       collect(c, Seq(9, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
   }
+
+  /** The frame for an integer type: header, then the value in `bytes` bytes. */
+  def intFrame(id: Int, flags: Int, value: BigInt, bytes: Int): Seq[Int] =
+    Seq(id, flags) ++ (0 until bytes).map(i => ((value >> (8 * i)) & 0xff).toInt)
+
+  def submitInt(c: NumberSerializer, id: Int, negative: Boolean, magnitude: BigInt,
+                isFloat: Boolean = false): Unit =
+    submit(c, id, negative, magnitude, mantissa = 0, exp10 = 0, isFloat = isFloat, overflow = false)
+
+  it should "send an Int32 in two's complement" in {
+    test(new NumberSerializer(ValueType.Int32)) { c =>
+      submitInt(c, 1, negative = false, magnitude = 25)
+      collect(c, Seq(1, 0, 25, 0, 0, 0))
+      submitInt(c, 2, negative = true, magnitude = 7)
+      collect(c, Seq(2, 1, 0xf9, 0xff, 0xff, 0xff))
+      submitInt(c, 3, negative = true, magnitude = 0)
+      collect(c, Seq(3, 1, 0, 0, 0, 0))
+    }
+  }
+
+  it should "flag an Int32 outside its range" in {
+    test(new NumberSerializer(ValueType.Int32)) { c =>
+      val max = (BigInt(1) << 31) - 1
+      submitInt(c, 0, negative = false, magnitude = max)
+      collect(c, intFrame(0, 0, max, 4))
+      submitInt(c, 0, negative = false, magnitude = max + 1)
+      collect(c, intFrame(0, 4, max + 1, 4))
+      submitInt(c, 0, negative = true, magnitude = max + 1)
+      collect(c, Seq(0, 1, 0, 0, 0, 0x80))
+      submitInt(c, 0, negative = true, magnitude = max + 2)
+      collect(c, intFrame(0, 5, -(max + 2), 4))
+    }
+  }
+
+  it should "send an Int64 in two's complement and flag its range" in {
+    test(new NumberSerializer(ValueType.Int64)) { c =>
+      val max = (BigInt(1) << 63) - 1
+      submitInt(c, 0, negative = true, magnitude = 1)
+      collect(c, Seq(0, 1) ++ Seq.fill(8)(0xff))
+      submitInt(c, 0, negative = false, magnitude = max)
+      collect(c, intFrame(0, 0, max, 8))
+      submitInt(c, 0, negative = false, magnitude = max + 1)
+      collect(c, intFrame(0, 4, max + 1, 8))
+      submitInt(c, 0, negative = true, magnitude = max + 1)
+      collect(c, intFrame(0, 1, -(max + 1), 8))
+      submitInt(c, 0, negative = true, magnitude = max + 2)
+      collect(c, intFrame(0, 5, -(max + 2), 8))
+    }
+  }
+
+  it should "keep isFloat set when an integer type receives a fraction" in {
+    test(new NumberSerializer(ValueType.Int32)) { c =>
+      submitInt(c, 0, negative = false, magnitude = 12, isFloat = true)
+      collect(c, Seq(0, 2, 12, 0, 0, 0))
+    }
+  }
 }

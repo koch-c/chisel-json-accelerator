@@ -77,9 +77,9 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
       io.out.bits := loader.io.out.bits.data
       loader.io.out.ready := io.out.ready
       loader.io.out.bits.last
-    case ValueType.Number =>
+    case _ =>
       val parser = withReset(recordReset) { Module(new NumberParser) }
-      val serializer = withReset(recordReset) { Module(new NumberSerializer) }
+      val serializer = withReset(recordReset) { Module(new NumberSerializer(config.valueType)) }
       parser.io.in <> loader.io.out
       serializer.io.in <> parser.io.out
       io.out <> serializer.io.out

@@ -191,4 +191,20 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.recordBytes("{\"v\":21}\n", numberFrame(0, 21))
     }
   }
+
+  it should "send Int32 values in two's complement and flag the ones that do not fit" in {
+    run(JsonPathConfig(Seq("v"), attributeId = 2, valueType = ValueType.Int32)) { d =>
+      d.recordBytes("{\"v\":25,\"v\":-7}\n", Seq(2, 0, 25, 0, 0, 0) ++ Seq(2, 1, 0xf9, 0xff, 0xff, 0xff))
+      d.recordBytes("{\"v\":2147483648}\n", Seq(2, 4, 0, 0, 0, 0x80))
+      d.recordBytes("{\"v\":1.5}\n", Seq(2, 2, 1, 0, 0, 0))
+      d.recordBytes("{\"v\":\"hot\"}\n", Seq(2, 8, 0, 0, 0, 0))
+    }
+  }
+
+  it should "send Int64 values in two's complement" in {
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.Int64), stall = true) { d =>
+      d.recordBytes("{\"v\":-9223372036854775808,\"v\":4294967296}\n",
+        Seq(0, 1, 0, 0, 0, 0, 0, 0, 0, 0x80) ++ Seq(0, 0, 0, 0, 0, 0, 1, 0, 0, 0))
+    }
+  }
 }
