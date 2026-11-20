@@ -207,4 +207,54 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
         Seq(0, 1, 0, 0, 0, 0, 0, 0, 0, 0x80) ++ Seq(0, 0, 0, 0, 0, 0, 1, 0, 0, 0))
     }
   }
+
+  it should "match a software reference for random numbers" in {
+    val random = new scala.util.Random(2026)
+    def digits(count: Int): String = Seq.fill(count)(random.nextInt(10)).mkString
+    // At most 18 mantissa digits, so every number fits in 64 bits.
+    def randomNumber(): String = {
+      val sign = if (random.nextBoolean()) "-" else ""
+      val integer =
+        if (random.nextInt(5) == 0) "0"
+        else (1 + random.nextInt(9)).toString + digits(random.nextInt(9))
+      val fraction = if (random.nextBoolean()) "." + digits(1 + random.nextInt(9)) else ""
+      val exponent =
+        if (random.nextInt(3) == 0)
+          Seq("e", "E")(random.nextInt(2)) + Seq("", "+", "-")(random.nextInt(3)) +
+            digits(1 + random.nextInt(3))
+        else ""
+      sign + integer + fraction + exponent
+    }
+
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number)) { d =>
+      for (_ <- 0 until 40) {
+        val text = randomNumber()
+        // Random padding moves the number to a different byte offset each time.
+        val pad = "x" * random.nextInt(9)
+        val gap = " " * random.nextInt(3)
+        val previous = d.completions
+        d.send("{\"pad\":\"" + pad + "\",\"v\":" + gap + text + gap + "}\n")
+        d.waitFor(d.completions > previous)
+
+        val frame = d.output.toSeq
+        d.output.clear()
+        assert(frame.length == 12, s"Expected one frame for $text, got $frame")
+        val flags = frame(1)
+        val value = (0 until 8).map(i => BigInt(frame(2 + i)) << (8 * i)).sum
+        val exp10 = (frame(10) | (frame(11) << 8)).toShort.toInt
+        val negative = (flags & 1) != 0
+        val isFloat = (flags & 2) != 0
+
+        assert(negative == text.startsWith("-"), s"sign of $text")
+        assert(isFloat == text.exists(c => c == '.' || c == 'e' || c == 'E'), s"isFloat of $text")
+        assert((flags & 12) == 0, s"overflow or notANumber set for $text")
+
+        // Rebuild the value from the frame and compare it with the JVM's own parse.
+        val magnitude = new java.math.BigDecimal(value.bigInteger)
+          .scaleByPowerOfTen(if (isFloat) exp10 else 0)
+        val expected = new java.math.BigDecimal(text).abs()
+        assert(magnitude.compareTo(expected) == 0, s"$text was parsed as $magnitude")
+      }
+    }
+  }
 }
