@@ -92,6 +92,10 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
 
+  /** The StringParser frame for one decoded string. */
+  private def stringFrame(id: Int, text: String, flags: Int = 0): Seq[Int] =
+    Seq(id) ++ text.getBytes("UTF-8").map(_ & 0xff) ++ Seq(0, flags)
+
   "Accelerator" should "extract numbers and reset between matching and missing records" in {
     run(JsonPathConfig(Seq("temperature"))) { d =>
       d.record("{\"temperature\": 25,\"humidity\":60}\n", ": 25")
@@ -205,6 +209,46 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     run(JsonPathConfig(Seq("v"), valueType = ValueType.Int64), stall = true) { d =>
       d.recordBytes("{\"v\":-9223372036854775808,\"v\":4294967296}\n",
         Seq(0, 1, 0, 0, 0, 0, 0, 0, 0, 0x80) ++ Seq(0, 0, 0, 0, 0, 0, 1, 0, 0, 0))
+    }
+  }
+
+  it should "send a string as a decoded frame and nothing for a missing key" in {
+    run(JsonPathConfig(Seq("name"), attributeId = 5, valueType = ValueType.String)) { d =>
+      d.recordBytes("{\"name\": \"Ada\",\"age\":36}\n", stringFrame(5, "Ada"))
+      d.recordBytes("{\"age\":36}\n", Seq.empty)
+      d.recordBytes("{\"name\":\"\"  }\n", stringFrame(5, ""))
+    }
+  }
+
+  it should "decode escapes and keep structural characters in a string" in {
+    run(JsonPathConfig(Seq("name"), valueType = ValueType.String)) { d =>
+      d.recordBytes("{\"name\" : \"a\\\"b,}:\\n\\\\ \\/\" }\n", stringFrame(0, "a\"b,}:\n\\ /"))
+      // \u0041 is not decoded: the frame is flagged with badEscape.
+      d.recordBytes("{\"name\" : \"\\u0041\" }\n", stringFrame(0, "u0041", flags = 2))
+    }
+  }
+
+  it should "decode a string selected by a nested path" in {
+    run(JsonPathConfig(Seq("device", "location", "city"), valueType = ValueType.String)) { d =>
+      d.recordBytes("{\"city\":\"x\",\"device\":{\"location\":{\"city\": \"Kongens Lyngby\"}}}\n",
+        stringFrame(0, "Kongens Lyngby"))
+    }
+  }
+
+  it should "send one string frame per match under output backpressure" in {
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.String), stall = true) { d =>
+      d.recordBytes("{\"v\":\"one\",\"v\":2,\"v\":\"0123456789abcdefghij\"}\n",
+        stringFrame(0, "one") ++ stringFrame(0, "", flags = 1) ++
+          stringFrame(0, "0123456789abcdefghij"))
+      d.recordBytes("{\"v\":\"again\"}\n", stringFrame(0, "again"))
+    }
+  }
+
+  it should "flag a value that is not a string" in {
+    run(JsonPathConfig(Seq("v"), valueType = ValueType.String)) { d =>
+      d.recordBytes("{\"v\": 21}\n", stringFrame(0, "", flags = 1))
+      d.recordBytes("{\"v\":null}\n", stringFrame(0, "", flags = 1))
+      d.recordBytes("{\"v\":\"hot\"}\n", stringFrame(0, "hot"))
     }
   }
 

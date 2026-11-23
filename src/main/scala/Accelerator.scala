@@ -3,7 +3,8 @@ import chisel3.util._
 
 /** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
   * Each valid JSON object line, including LF, must fit within 4096 bytes.
-  * out contains the exact AttributeLoader bytes, without added framing.
+  * out depends on config.valueType: the exact AttributeLoader bytes without
+  * added framing (Raw), a NumberSerializer frame, or a StringParser frame.
   * done pulses for one cycle after LF, parsing, and all output transfers finish.
   * It denotes byte acceptance by the consumer, not physical UART completion.
   */
@@ -66,13 +67,18 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
   pda.io.in <> fifo.io.out
   loader.io.descriptor <> pda.io.descriptor
 
-  // Output stage can choose between the raw output or a parsed number. 
+  // Output stage can choose between the raw output, a parsed number or a decoded string.
   val lastOut = config.valueType match {
     case ValueType.Raw =>
       io.out.valid := loader.io.out.valid
       io.out.bits := loader.io.out.bits.data
       loader.io.out.ready := io.out.ready
       loader.io.out.bits.last
+    case ValueType.String =>
+      val parser = withReset(recordReset) { Module(new StringParser) }
+      parser.io.in <> loader.io.out
+      io.out <> parser.io.out
+      parser.io.last
     case _ =>
       val parser = withReset(recordReset) { Module(new NumberParser) }
       val serializer = withReset(recordReset) { Module(new NumberSerializer(config.valueType)) }
@@ -88,7 +94,8 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
 
   // Attributes that have been handed to the loader but whose output has not
   // been fully accepted yet. At most three: one each in the loader, the number
-  // parser and the serializer.
+  // parser and the serializer (the string path has only the loader and the
+  // string parser).
   val pendingAttributes = RegInit(0.U(2.W))
   val attributeStarted = loader.io.descriptor.fire
   val attributeFinished = io.out.fire && lastOut

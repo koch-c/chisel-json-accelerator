@@ -9,6 +9,8 @@ object ValueType {
   case object Int32 extends ValueType
   /** Parsed by NumberParser and sent as a 64-bit two's complement integer. */
   case object Int64 extends ValueType
+  /** Decoded by StringParser and sent without quotes, followed by 0x00 and a flags byte. */
+  case object String extends ValueType
 }
 
 
