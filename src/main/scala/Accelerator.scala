@@ -39,7 +39,7 @@ class Accelerator(
     )
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
-  val loader = withReset(recordReset) { Module(new AttributeLoader) }
+  val lane = withReset(recordReset) { Module(new ParserLane(config.valueType)) }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -68,38 +68,19 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := loader.io.read.valid
-  buffer.io.readAddress := loader.io.read.bits
-  loader.io.read.ready := true.B
-  loader.io.readData := buffer.io.readData
-  loader.io.readValid := buffer.io.readValid
+  buffer.io.readEnable := lane.io.read.valid
+  buffer.io.readAddress := lane.io.read.bits
+  lane.io.read.ready := true.B
+  lane.io.readData := buffer.io.readData
+  lane.io.readValid := buffer.io.readValid
 
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
-  loader.io.descriptor <> pda.io.descriptor
+  lane.io.descriptor <> pda.io.descriptor
 
-  // Output stage can choose between the raw output, a parsed number or a decoded string.
-  val lastOut = config.valueType match {
-    case ValueType.Raw =>
-      io.out.valid := loader.io.out.valid
-      io.out.bits := loader.io.out.bits.data
-      loader.io.out.ready := io.out.ready
-      loader.io.out.bits.last
-    case ValueType.String =>
-      val parser = withReset(recordReset) { Module(new StringParser) }
-      parser.io.in <> loader.io.out
-      io.out <> parser.io.out
-      parser.io.last
-    case _ =>
-      val parser = withReset(recordReset) { Module(new NumberParser) }
-      val serializer = withReset(recordReset) {
-        Module(new NumberSerializer(config.valueType))
-      }
-      parser.io.in <> loader.io.out
-      serializer.io.in <> parser.io.out
-      io.out <> serializer.io.out
-      serializer.io.last
-  }
+  // The lane loads the value and sends it raw, as a number or as a string.
+  io.out <> lane.io.out
+  val lastOut = lane.io.last
 
   val endSeen = RegInit(false.B)
 
@@ -108,7 +89,7 @@ class Accelerator(
   // parser and the serializer (the string path has only the loader and the
   // string parser).
   val pendingAttributes = RegInit(0.U(2.W))
-  val attributeStarted = loader.io.descriptor.fire
+  val attributeStarted = lane.io.descriptor.fire
   val attributeFinished = io.out.fire && lastOut
   val attributeBusy = pendingAttributes =/= 0.U
 
