@@ -12,22 +12,20 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
     log2Ceil(maxDepth + 1)
   ) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
 
-  // Slot 0 is the root state `$`; each open bracket pushes a new TOS slot.
-  val stackPointer = UInt(stackPointerWidth.W)
-  val stack = Vec(maxDepth + 1, UInt(stateWidth.W)) // The stack holding
-  val projecting = Bool()
-  val colonAddress = UInt(12.W)
-  val found = Bool()
-  val done = Bool()
+  val stackPointer = UInt(stackPointerWidth.W) // Points to where in the stack
+  val stack = Vec(maxDepth + 1, UInt(stateWidth.W)) // The stack holding values corresponding to how far a key is matched.
+  val projecting = Bool() // If we have found a colon and we project we're gonna find the value.
+  val colonAddress = UInt(12.W) // The address of the current colon.
+  val found = Bool() // If any of the requested keys are found.
+  val done = Bool() // Done is set when the outer most } or ] is found.
 }
 
-/** Pushdown automaton for one fixed key path, using the interfaces from the
+/** Pushdown automaton for configured key paths, using the interfaces from the
   * Lexer and attribute-loader branches. The Lexer recognizes key strings and
   * emits `JsonSymbol`s; this module only tracks path state and JSON nesting.
   */
 class PushdownAutomaton(config: JsonPathConfig) extends Module {
-  private val path = config.path
-  private val paths = config.allPaths
+  private val paths = config.paths
   private val maxDepth = config.maxDepth
   private val keyIds = config.keyIds
   private val keyIdWidth = math.max(1, log2Ceil(keyIds.size max 2))
@@ -80,6 +78,14 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val pendingDescriptorBits = Reg(new AttributeDescriptor)
   val pendingEndOfRecord = RegInit(false.B)
 
+  /**
+    * Transition.
+    *
+    * @param current
+    * @param symbol
+    * @param symbolValid
+    * @return
+    */
   private def transition(
       current: PdaState,
       symbol: JsonSymbol,
@@ -109,7 +115,9 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
       .map(id => current.stack(tosIndex) === id.U(stateWidth.W))
       .foldLeft(false.B)(_ || _)
 
+    // When a valid symbol exists within the entries.
     when(symbolValid) {
+      // if the symbol is either '{' or '[' and the stackpointer is not at the maxDepth. We can move the stackpointer and add a new entry of 0.
       when(
         symbol.kind === SymbolKind.ObjOpen || symbol.kind === SymbolKind.ArrOpen
       ) {
@@ -119,9 +127,12 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
             (current.stackPointer + 1.U)(stackPointerWidth - 1, 0)
           ) := 0.U
         }
-      }.elsewhen(symbol.kind === SymbolKind.Key) {
+      }
+      //When the symbol is a key and the stackpointer is further along that 0th index.
+      .elsewhen(symbol.kind === SymbolKind.Key) {
         when(current.stackPointer =/= 0.U) {
-          next.stack(tosIndex) := Mux(hasTransition, targetState, 0.U)
+          next.stack(tosIndex) := Mux(hasTransition, targetState, 0.U) // If theres a valid transition we set the top of the stack to targetState.
+          // If theres a transition and the the targetState is one of the terminalStates we have found a match.
           when(
             hasTransition && terminalStates.toSeq
               .map(id => targetState === id.U(stateWidth.W))
@@ -130,22 +141,27 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
             next.found := true.B
           }
         }
-      }.elsewhen(symbol.kind === SymbolKind.Colon) {
+      }
+      // If the symbol is a colon and the it is terminal, we know a value has to be captured. Thus set projecting and colon address.
+      .elsewhen(symbol.kind === SymbolKind.Colon) {
         when(isTerminal) {
-          // The paper defines the first colon after a terminal path as start.
           next.projecting := true.B
           next.colonAddress := symbol.addr
         }
-      }.elsewhen(symbol.kind === SymbolKind.Comma) {
+      }
+      // If the symbol is a comma and we're currently looking in a value, it means we're done looking sp we can set the project flag. And calculate the value size.
+      .elsewhen(symbol.kind === SymbolKind.Comma) {
         when(current.projecting) {
           project := true.B
           projectAddress := current.colonAddress
           projectLength := symbol.addr - current.colonAddress
           next.projecting := false.B
         }
+        //If the stackpointer is not 0, we inject a zero in the stack.
         when(current.stackPointer =/= 0.U) {
           next.stack(tosIndex) := 0.U
         }
+      // If the symbol is either '}' or ']' and we're currently projecting, we set the projecting falg false and project true and calculate value length.
       }.elsewhen(
         symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose
       ) {
@@ -155,6 +171,8 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
           projectLength := symbol.addr - current.colonAddress
           next.projecting := false.B
         }
+        // If the stackpointer is progressed, we remove one from the stackpointer.
+        // Unless the stackpoiter is already at 1 in which the program is done.
         when(current.stackPointer =/= 0.U) {
           next.stackPointer := current.stackPointer - 1.U
           when(current.stackPointer === 1.U) {
@@ -168,8 +186,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     (next, project, projectAddress, projectLength, endOfRecord)
   }
 
-  // A FIFO batch may contain one or two symbols. The second sees the first's
-  // state updates, just like the two serial s_proc stages in the paper.
+  // Two concurrent symbols are processed. The valid entry, says within the entries are there a valid symbol.
   val valid0 = io.in.valid && io.in.bits.count > 0.U
   val valid1 = io.in.valid && io.in.bits.count > 1.U
   val (after0, project0, address0, length0, eor0) =

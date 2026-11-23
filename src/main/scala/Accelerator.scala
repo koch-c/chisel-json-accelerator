@@ -2,18 +2,16 @@ import chisel3._
 import chisel3.util._
 
 /** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
-  * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * contains the exact AttributeLoader bytes, without added framing. done pulses
-  * for one cycle after LF, parsing, and all output transfers finish. It denotes
-  * byte acceptance by the consumer, not physical UART completion.
+  * Each valid JSON object line, including LF, must fit within 4096 bytes.
+  * out contains the exact AttributeLoader bytes, without added framing.
+  * done pulses for one cycle after LF, parsing, and all output transfers finish.
+  * It denotes byte acceptance by the consumer, not physical UART completion.
   */
-class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature")))
-    extends Module {
+class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
     val out = Decoupled(UInt(8.W))
-    val done =
-      Output(Bool()) // TODO: Only used for testing. Consider removing in prod
+    val done = Output(Bool()) //TODO: Only used for testing. Consider removing in prod
   })
 
   val clearRecord = RegInit(false.B)
@@ -22,15 +20,8 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature")))
 
   val inputFIFO = withReset(recordReset) { Module(new InputFIFO) }
   val lexer = withReset(recordReset) {
-    Module(
-      new Lexer(
-        config.path.distinct,
-        maxDepth = config.maxDepth max 2,
-        addrWidth = 12
-      )
-    )
+    Module(new Lexer(config.keys, maxDepth = config.maxDepth max 2, addrWidth = 12))
   }
-  // The lexer emits up to 8 symbols per word; the PDA consumes up to 2 per cycle.
   val fifo = withReset(recordReset) {
     Module(
       new ChannelFifo(
@@ -89,9 +80,7 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature")))
       loader.io.out.bits.last
     case _ =>
       val parser = withReset(recordReset) { Module(new NumberParser) }
-      val serializer = withReset(recordReset) {
-        Module(new NumberSerializer(config.valueType))
-      }
+      val serializer = withReset(recordReset) { Module(new NumberSerializer(config.valueType)) }
       parser.io.in <> loader.io.out
       serializer.io.in <> parser.io.out
       io.out <> serializer.io.out
@@ -99,6 +88,8 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature")))
   }
 
   val endSeen = RegInit(false.B)
+
+
 
   // Attributes that have been handed to the loader but whose output has not
   // been fully accepted yet. At most three: one each in the loader, the number
@@ -108,13 +99,10 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature")))
   val attributeFinished = io.out.fire && lastOut
   val attributeBusy = pendingAttributes =/= 0.U
 
+
   when(pda.io.endOfRecord) { endSeen := true.B }
-  when(attributeStarted && !attributeFinished) {
-    pendingAttributes := pendingAttributes + 1.U
-  }
-  when(attributeFinished && !attributeStarted) {
-    pendingAttributes := pendingAttributes - 1.U
-  }
+  when(attributeStarted && !attributeFinished) { pendingAttributes := pendingAttributes + 1.U }
+  when(attributeFinished && !attributeStarted) { pendingAttributes := pendingAttributes - 1.U }
 
   // A closing brace may be parsed before LF arrives. Output backpressure holds
   // attributeBusy until the final byte is actually accepted by the consumer.
