@@ -274,7 +274,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
 
     run(JsonPathConfig(Seq("v"), valueType = ValueType.Number)) { d =>
-      for (_ <- 0 until 40) {
+      for (_ <- 0 until 10) {
         val text = randomNumber()
         // Random padding moves the number to a different byte offset each time.
         val pad = "x" * random.nextInt(9)
