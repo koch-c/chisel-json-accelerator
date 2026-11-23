@@ -7,7 +7,7 @@ import chisel3.util._
   * done pulses for one cycle after LF, parsing, and all output transfers finish.
   * It denotes byte acceptance by the consumer, not physical UART completion.
   */
-class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) extends Module {
+class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
     val out = Decoupled(UInt(8.W))
@@ -20,7 +20,7 @@ class Accelerator(config: JsonPathConfig = JsonPathConfig(Seq("temperature"))) e
 
   val inputFIFO = withReset(recordReset) { Module(new InputFIFO) }
   val lexer = withReset(recordReset) {
-    Module(new Lexer(config.path.distinct, maxDepth = config.maxDepth max 2, addrWidth = 12))
+    Module(new Lexer(config.keys, maxDepth = config.maxDepth max 2, addrWidth = 12))
   }
   val fifo = withReset(recordReset) {
     Module(new ChannelFifo(new JsonSymbol(config.keyIds.size, 12),

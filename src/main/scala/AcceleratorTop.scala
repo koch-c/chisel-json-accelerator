@@ -5,7 +5,7 @@ import chisel3._
   * 4096 bytes. UART has no flow control. TX adds no framing to the raw output.
   */
 class AcceleratorTop(
-    config: JsonPathConfig = JsonPathConfig(Seq("temperature")),
+    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature"))),
     clockHz: Int = 100000000,
     baudRate: Int = 115200
 ) extends Module {
@@ -26,7 +26,7 @@ class AcceleratorTop(
 
 object GenerateAcceleratorTop extends App {
   emitVerilog(
-    new AcceleratorTop(JsonPathConfig(Seq("sensor", "temperature"), valueType = ValueType.Number)),
+    new AcceleratorTop(JsonPathConfig(Seq(Seq("sensor", "temperature")), valueType = ValueType.Number)),
     Array("--target-dir", "generated")
   )
 }

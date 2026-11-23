@@ -21,8 +21,7 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   * emits `JsonSymbol`s; this module only tracks path state and JSON nesting.
   */
 class PushdownAutomaton(config: JsonPathConfig) extends Module {
-  private val path = config.path
-  private val paths = config.allPaths
+  private val paths = config.paths
   private val maxDepth = config.maxDepth
   private val keyIds = config.keyIds
   private val keyIdWidth = math.max(1, log2Ceil(keyIds.size max 2))

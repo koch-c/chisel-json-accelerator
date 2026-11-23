@@ -50,7 +50,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
     TestSymbol(SymbolKind.Key, addr, config.keyIds(name))
 
   "PushdownAutomaton" should "send a loader descriptor for the requested nested path" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"), attributeId = 7)
+    val config = JsonPathConfig(Seq(Seq("device", "location", "latitude")), attributeId = 7)
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -77,7 +77,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "ignore a key symbol outside the requested nesting context" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"))
+    val config = JsonPathConfig(Seq(Seq("device", "location", "latitude")))
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -98,9 +98,8 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "match alternative paths that share a root, like $.(id | user.name)" in {
     val config = JsonPathConfig(
-      path = Seq("id"),
-      attributeId = 4,
-      additionalPaths = Seq(Seq("user", "name"))
+      paths = Seq(Seq("id"), Seq("user", "name")),
+      attributeId = 4
     )
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
@@ -126,7 +125,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "hold the loader descriptor stable while the loader is stalled" in {
-    val config = JsonPathConfig(Seq("temperature"), attributeId = 3)
+    val config = JsonPathConfig(Seq(Seq("temperature")), attributeId = 3)
     test(new PushdownAutomaton(config)) { c =>
       c.io.descriptor.ready.poke(false.B)
       val symbols = Seq(
@@ -169,7 +168,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "connect directly to the two-symbol ChannelFifo output" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"), attributeId = 7)
+    val config = JsonPathConfig(Seq(Seq("device", "location", "latitude")), attributeId = 7)
     test(new PdaFifoHarness(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),

@@ -61,13 +61,39 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   "AcceleratorTop" should "connect UART RX through the core to unmodified UART TX" in {
-    exchange(JsonPathConfig(Seq("v")), "{\"v\":1}\n", Seq(':'.toInt, '1'.toInt))
+    exchange(JsonPathConfig(Seq(Seq("v"))), "{\"v\":1}\n", Seq(':'.toInt, '1'.toInt))
   }
 
   it should "send a number frame over UART" in {
     // -12.5 is mantissa 125 with exp10 -1. Flags: negative and isFloat.
-    exchange(JsonPathConfig(Seq("v"), attributeId = 7, valueType = ValueType.Number),
+    exchange(JsonPathConfig(Seq(Seq("v")), attributeId = 7, valueType = ValueType.Number),
       "{\"v\":-12.5}\n",
       Seq(7, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff))
+  }
+
+  it should "extract every configured path through the whole UART pipeline" in {
+    // RX -> InputFIFO -> Lexer -> ChannelFifo -> PDA -> AttributeLoader -> TX.
+    // The nested "id" and the array must not match; both paths must.
+    exchange(
+      JsonPathConfig(Seq(Seq("id"), Seq("user", "name"))),
+      "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
+      ":7:\"bob\"".map(_.toInt)
+    )
+  }
+
+  it should "extract several disjoint paths in input order, not config order" in {
+    exchange(
+      JsonPathConfig(Seq(Seq("a"), Seq("b", "c"), Seq("d", "e", "f"))),
+      "{\"d\":{\"e\":{\"f\":3}},\"b\":{\"c\":2,\"a\":9},\"a\":1}\n",
+      ":3:2:1".map(_.toInt)
+    )
+  }
+
+  it should "extract a union of keys under a shared prefix, like $.device.(lat | lon)" in {
+    exchange(
+      JsonPathConfig(Seq(Seq("device", "lat"), Seq("device", "lon"))),
+      "{\"lat\":0,\"device\":{\"lon\":2,\"alt\":5,\"lat\":1}}\n",
+      ":2:1".map(_.toInt)
+    )
   }
 }
