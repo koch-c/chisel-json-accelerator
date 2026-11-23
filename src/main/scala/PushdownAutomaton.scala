@@ -3,8 +3,14 @@ import chisel3.util._
 
 /** PDA state used to calculate two ChannelFifo symbol transitions per cycle. */
 class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
-  private val stateWidth = math.max(1, log2Ceil(pathLength + 1)) // Path length is the amount of keys in the jsonPath, in sensor.temperature it would be log2(2 + 1).Which in this case would return 2 because 3 values can be expressed on 2 bits.
-  private val stackPointerWidth = math.max(1, log2Ceil(maxDepth + 1)) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
+  private val stateWidth = math.max(
+    1,
+    log2Ceil(pathLength + 1)
+  ) // Path length is the amount of keys in the jsonPath, in sensor.temperature it would be log2(2 + 1).Which in this case would return 2 because 3 values can be expressed on 2 bits.
+  private val stackPointerWidth = math.max(
+    1,
+    log2Ceil(maxDepth + 1)
+  ) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
 
   // Slot 0 is the root state `$`; each open bracket pushes a new TOS slot.
   val stackPointer = UInt(stackPointerWidth.W)
@@ -15,8 +21,7 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   val done = Bool()
 }
 
-/**
-  * Pushdown automaton for one fixed key path, using the interfaces from the
+/** Pushdown automaton for one fixed key path, using the interfaces from the
   * Lexer and attribute-loader branches. The Lexer recognizes key strings and
   * emits `JsonSymbol`s; this module only tracks path state and JSON nesting.
   */
@@ -32,9 +37,11 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     paths.foreach { candidate =>
       var parent = 0
       candidate.foreach { key =>
-        builtEdges.find(edge => edge._1 == parent && edge._2 == keyIds(key)) match {
+        builtEdges.find(edge =>
+          edge._1 == parent && edge._2 == keyIds(key)
+        ) match {
           case Some((_, _, child)) => parent = child
-          case None =>
+          case None                =>
             builtEdges += ((parent, keyIds(key), nextState))
             parent = nextState
             nextState += 1
@@ -43,7 +50,10 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     }
     val terminals = paths.map { candidate =>
       candidate.foldLeft(0) { (parent, key) =>
-        builtEdges.find(edge => edge._1 == parent && edge._2 == keyIds(key)).get._3
+        builtEdges
+          .find(edge => edge._1 == parent && edge._2 == keyIds(key))
+          .get
+          ._3
       }
     }.toSet
     (builtEdges.toSeq, nextState, terminals)
@@ -71,9 +81,9 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val pendingEndOfRecord = RegInit(false.B)
 
   private def transition(
-    current: PdaState,
-    symbol: JsonSymbol,
-    symbolValid: Bool
+      current: PdaState,
+      symbol: JsonSymbol,
+      symbolValid: Bool
   ): (PdaState, Bool, UInt, UInt, Bool) = {
     val next = Wire(new PdaState(trieStateCount - 1, maxDepth))
     next := current
@@ -83,28 +93,40 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     val endOfRecord = WireDefault(false.B)
 
     // A key transition is selected from TOS-1 and writes its target into TOS.
-    val parentIndex = Mux(current.stackPointer === 0.U, 0.U, current.stackPointer - 1.U)
-      (stackPointerWidth - 1, 0)
+    val parentIndex =
+      Mux(current.stackPointer === 0.U, 0.U, current.stackPointer - 1.U)
+    (stackPointerWidth - 1, 0)
     val parentState = current.stack(parentIndex)
     val tosIndex = current.stackPointer(stackPointerWidth - 1, 0)
     val keyTransitions = edges.map { case (parent, keyId, _) =>
-      (symbol.keyId === keyId.U(keyIdWidth.W)) && (parentState === parent.U(stateWidth.W))
+      (symbol.keyId === keyId.U(keyIdWidth.W)) && (parentState === parent.U(
+        stateWidth.W
+      ))
     }
     val hasTransition = keyTransitions.foldLeft(false.B)(_ || _)
     val targetState = Mux1H(keyTransitions, edges.map(_._3.U(stateWidth.W)))
-    val isTerminal = terminalStates.toSeq.map(id => current.stack(tosIndex) === id.U(stateWidth.W))
+    val isTerminal = terminalStates.toSeq
+      .map(id => current.stack(tosIndex) === id.U(stateWidth.W))
       .foldLeft(false.B)(_ || _)
 
     when(symbolValid) {
-      when(symbol.kind === SymbolKind.ObjOpen || symbol.kind === SymbolKind.ArrOpen) {
+      when(
+        symbol.kind === SymbolKind.ObjOpen || symbol.kind === SymbolKind.ArrOpen
+      ) {
         when(current.stackPointer < maxDepth.U) {
           next.stackPointer := current.stackPointer + 1.U
-          next.stack((current.stackPointer + 1.U)(stackPointerWidth - 1, 0)) := 0.U
+          next.stack(
+            (current.stackPointer + 1.U)(stackPointerWidth - 1, 0)
+          ) := 0.U
         }
       }.elsewhen(symbol.kind === SymbolKind.Key) {
         when(current.stackPointer =/= 0.U) {
           next.stack(tosIndex) := Mux(hasTransition, targetState, 0.U)
-          when(hasTransition && terminalStates.toSeq.map(id => targetState === id.U(stateWidth.W)).foldLeft(false.B)(_ || _)) {
+          when(
+            hasTransition && terminalStates.toSeq
+              .map(id => targetState === id.U(stateWidth.W))
+              .foldLeft(false.B)(_ || _)
+          ) {
             next.found := true.B
           }
         }
@@ -124,7 +146,9 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
         when(current.stackPointer =/= 0.U) {
           next.stack(tosIndex) := 0.U
         }
-      }.elsewhen(symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose) {
+      }.elsewhen(
+        symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose
+      ) {
         when(current.projecting) {
           project := true.B
           projectAddress := current.colonAddress

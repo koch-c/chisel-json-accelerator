@@ -1,8 +1,8 @@
 import chisel3._
 import chisel3.util._
 
-/** A packed batch: only entries 0 until count are meaningful.
-  * A valid batch must contain between one and width entries.
+/** A packed batch: only entries 0 until count are meaningful. A valid batch
+  * must contain between one and width entries.
   */
 class ChannelBatch[T <: Data](gen: T, width: Int) extends Bundle {
   require(width > 0, "Batch width must be positive")
@@ -23,8 +23,8 @@ class ChannelBatch[T <: Data](gen: T, width: Int) extends Bundle {
   * exceed depth. Output batches may be partial; full batches are not awaited.
   *
   * Input acceptance is atomic and conservative: it uses current free capacity
-  * and bank readiness, without looking ahead to simultaneous dequeues. There
-  * is no empty-queue bypass. Output entries and count remain stable when stalled.
+  * and bank readiness, without looking ahead to simultaneous dequeues. There is
+  * no empty-queue bypass. Output entries and count remain stable when stalled.
   */
 class ChannelFifo[T <: Data](
     gen: T,
@@ -33,8 +33,10 @@ class ChannelFifo[T <: Data](
     dequeueWidth: Int = 2
 ) extends Module {
   require(enqueueWidth > 0 && dequeueWidth > 0, "Batch widths must be positive")
-  require(depth >= math.max(enqueueWidth, dequeueWidth),
-    "Channel FIFO must hold at least one maximum-sized input or output batch")
+  require(
+    depth >= math.max(enqueueWidth, dequeueWidth),
+    "Channel FIFO must hold at least one maximum-sized input or output batch"
+  )
   private val bankCount = math.max(enqueueWidth, dequeueWidth)
   require(isPow2(bankCount), "Bank count must be a power of two")
   require(depth % bankCount == 0, "Depth must be a multiple of the bank count")
@@ -44,8 +46,9 @@ class ChannelFifo[T <: Data](
     val out = Decoupled(new ChannelBatch(gen, dequeueWidth))
   })
 
-  val banks = Seq.fill(bankCount)(Module(new Queue(gen, depth / bankCount,
-    pipe = false, flow = false)))
+  val banks = Seq.fill(bankCount)(
+    Module(new Queue(gen, depth / bankCount, pipe = false, flow = false))
+  )
   val pointerWidth = math.max(1, log2Ceil(bankCount))
   val writeBank = RegInit(0.U(pointerWidth.W))
   val readBank = RegInit(0.U(pointerWidth.W))
@@ -57,12 +60,16 @@ class ChannelFifo[T <: Data](
   def selectBank[A <: Data](values: Vec[A], index: UInt): A =
     if (bankCount == 1) values(0) else values(index)
 
-  val inputBanks = VecInit((0 until enqueueWidth).map(i => bankAt(writeBank, i.U)))
+  val inputBanks = VecInit(
+    (0 until enqueueWidth).map(i => bankAt(writeBank, i.U))
+  )
   val bankReady = VecInit(banks.map(_.io.enq.ready))
   val countValid = io.in.bits.count > 0.U && io.in.bits.count <= enqueueWidth.U
-  val destinationsReady = (0 until enqueueWidth).map { i =>
-    i.U >= io.in.bits.count || selectBank(bankReady, inputBanks(i))
-  }.reduce(_ && _)
+  val destinationsReady = (0 until enqueueWidth)
+    .map { i =>
+      i.U >= io.in.bits.count || selectBank(bankReady, inputBanks(i))
+    }
+    .reduce(_ && _)
   io.in.ready := countValid && destinationsReady &&
     (occupancy +& io.in.bits.count) <= depth.U
 
@@ -84,7 +91,9 @@ class ChannelFifo[T <: Data](
   io.out.valid := outputValid
   io.out.bits := outputBatch
 
-  val outputBanks = VecInit((0 until dequeueWidth).map(i => bankAt(readBank, i.U)))
+  val outputBanks = VecInit(
+    (0 until dequeueWidth).map(i => bankAt(readBank, i.U))
+  )
   val bankValid = VecInit(banks.map(_.io.deq.valid))
   val bankData = VecInit(banks.map(_.io.deq.bits))
   // Only take a consecutive prefix; never skip a missing entry.
@@ -95,14 +104,19 @@ class ChannelFifo[T <: Data](
   val loadOutput = (!outputValid || io.out.ready) && takeCount > 0.U
 
   for ((bank, index) <- banks.zipWithIndex) {
-    bank.io.deq.ready := loadOutput && (0 until dequeueWidth).map { i =>
-      available(i) && outputBanks(i) === index.U
-    }.reduce(_ || _)
+    bank.io.deq.ready := loadOutput && (0 until dequeueWidth)
+      .map { i =>
+        available(i) && outputBanks(i) === index.U
+      }
+      .reduce(_ || _)
   }
   when(loadOutput) {
     for (i <- 0 until dequeueWidth) {
-      outputBatch.entries(i) := Mux(available(i), selectBank(bankData, outputBanks(i)),
-        0.U.asTypeOf(gen))
+      outputBatch.entries(i) := Mux(
+        available(i),
+        selectBank(bankData, outputBanks(i)),
+        0.U.asTypeOf(gen)
+      )
     }
     outputBatch.count := takeCount
     outputValid := true.B

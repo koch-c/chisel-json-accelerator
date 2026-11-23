@@ -1,7 +1,8 @@
 import chisel3._
 import chisel3.util._
 
-/** Addresses and lengths are measured in bytes. Quotes, if present, are data. */
+/** Addresses and lengths are measured in bytes. Quotes, if present, are data.
+  */
 class AttributeDescriptor extends Bundle {
   val attributeId = UInt(8.W)
   val startAddress = UInt(12.W)
@@ -14,10 +15,10 @@ class AttributeByte extends Bundle {
   val last = Bool()
 }
 
-/** Fetches one attribute at a time from a 512 x 64-bit InputBuffer.
-  * Byte offset 0 is bits 7:0. Memory responses arrive one cycle after requests.
-  * Descriptors must have a nonzero length and stay within the 4096-byte buffer.
-  * The caller must keep the selected memory contents unchanged until completion.
+/** Fetches one attribute at a time from a 512 x 64-bit InputBuffer. Byte offset
+  * 0 is bits 7:0. Memory responses arrive one cycle after requests. Descriptors
+  * must have a nonzero length and stay within the 4096-byte buffer. The caller
+  * must keep the selected memory contents unchanged until completion.
   */
 class AttributeLoader extends Module {
   val io = IO(new Bundle {

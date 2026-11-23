@@ -4,14 +4,12 @@ import chisel3.util._
 /** Sends one ParsedNumber as a binary frame. All values are sent least
   * significant byte first.
   *
-  *   byte 0   attribute id
-  *   byte 1   flags: bit 0 negative, bit 1 isFloat, bit 2 overflow,
-  *            bit 3 notANumber
+  * byte 0 attribute id byte 1 flags: bit 0 negative, bit 1 isFloat, bit 2
+  * overflow, bit 3 notANumber
   *
-  * The rest depends on the value type:
-  *   Number   8 bytes integer (mantissa for a float), 2 bytes exp10
-  *   Int32    4 bytes two's complement
-  *   Int64    8 bytes two's complement
+  * The rest depends on the value type: Number 8 bytes integer (mantissa for a
+  * float), 2 bytes exp10 Int32 4 bytes two's complement Int64 8 bytes two's
+  * complement
   *
   * For Int32 and Int64, overflow is also set when the number is outside the
   * type's range, and a number with a fraction or exponent keeps isFloat set:
@@ -29,7 +27,8 @@ class NumberSerializer(valueType: ValueType = ValueType.Number) extends Module {
 
   val n = io.in.bits
 
-  /** The number as a two's complement integer, and whether it is out of range. */
+  /** The number as a two's complement integer, and whether it is out of range.
+    */
   private def integer(width: Int): (Seq[UInt], Bool) = {
     val limit = (BigInt(1) << (width - 1)).U(64.W) // 2^(width - 1)
     val outOfRange = Mux(n.negative, n.integer > limit, n.integer >= limit)
@@ -40,11 +39,12 @@ class NumberSerializer(valueType: ValueType = ValueType.Number) extends Module {
   val (payload, outOfRange) = valueType match {
     case ValueType.Int32 => integer(32)
     case ValueType.Int64 => integer(64)
-    case _ =>
+    case _               =>
       val value = Mux(n.isFloat, n.mantissa, n.integer)
       (bytesOf(value, 8) ++ bytesOf(n.exp10.asUInt, 2), false.B)
   }
-  val flags = Cat(0.U(4.W), n.notANumber, n.overflow || outOfRange, n.isFloat, n.negative)
+  val flags =
+    Cat(0.U(4.W), n.notANumber, n.overflow || outOfRange, n.isFloat, n.negative)
 
   val frameBytes = 2 + payload.size
   val busy = RegInit(false.B)

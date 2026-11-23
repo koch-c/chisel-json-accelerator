@@ -38,7 +38,11 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.out.ready.poke(false.B)
   }
 
-  def writeWord(c: AttributeLoaderHarness, address: Int, bytes: Seq[Int]): Unit = {
+  def writeWord(
+      c: AttributeLoaderHarness,
+      address: Int,
+      bytes: Seq[Int]
+  ): Unit = {
     val word = bytes.zipWithIndex.foldLeft(BigInt(0)) {
       case (acc, (byte, offset)) => acc | (BigInt(byte) << (8 * offset))
     }
@@ -49,7 +53,12 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.writeEnable.poke(false.B)
   }
 
-  def submit(c: AttributeLoaderHarness, start: Int, length: Int, id: Int): Unit = {
+  def submit(
+      c: AttributeLoaderHarness,
+      start: Int,
+      length: Int,
+      id: Int
+  ): Unit = {
     c.io.descriptor.ready.expect(true.B)
     c.io.descriptor.bits.startAddress.poke(start.U)
     c.io.descriptor.bits.length.poke(length.U)
@@ -59,8 +68,12 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.descriptor.valid.poke(false.B)
   }
 
-  def collect(c: AttributeLoaderHarness, expected: Seq[Int], id: Int,
-              stall: Boolean = false): Unit = {
+  def collect(
+      c: AttributeLoaderHarness,
+      expected: Seq[Int],
+      id: Int,
+      stall: Boolean = false
+  ): Unit = {
     for ((byte, index) <- expected.zipWithIndex) {
       var cycles = 0
       while (!c.io.out.valid.peek().litToBoolean && cycles < 20) {

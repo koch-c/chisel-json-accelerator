@@ -1,10 +1,10 @@
 import chisel3._
 
-/** Stores 512 eight-byte words (4096 bytes) for the attribute loader.
-  * Addresses select words, not bytes. Byte 0 occupies bits 7:0.
-  * Reads return one cycle after readEnable; the consumer must accept the result.
-  * Contents are not cleared on reset. Do not read unwritten locations or read
-  * and write the same address in the same cycle (the result is undefined).
+/** Stores 512 eight-byte words (4096 bytes) for the attribute loader. Addresses
+  * select words, not bytes. Byte 0 occupies bits 7:0. Reads return one cycle
+  * after readEnable; the consumer must accept the result. Contents are not
+  * cleared on reset. Do not read unwritten locations or read and write the same
+  * address in the same cycle (the result is undefined).
   */
 class InputBuffer extends Module {
   val io = IO(new Bundle {
