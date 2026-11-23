@@ -2,10 +2,17 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** One serial smoke test; detailed extraction tests use Accelerator directly. */
+/** One serial smoke test; detailed extraction tests use Accelerator directly.
+  */
 class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
-  /** Sends a record over the RX pin and checks the bytes that come back on TX. */
-  private def exchange(config: JsonPathConfig, json: String, expected: Seq[Int]): Unit = {
+
+  /** Sends a record over the RX pin and checks the bytes that come back on TX.
+    */
+  private def exchange(
+      config: JsonPathConfig,
+      json: String,
+      expected: Seq[Int]
+  ): Unit = {
     val clocksPerBit = 8
     test(new AcceleratorTop(config, clockHz = 80, baudRate = 10)) { c =>
       // A frame takes longer to send than chiseltest's default limit of 1000
@@ -42,7 +49,9 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       for (b <- json.getBytes("UTF-8")) {
-        val bits = Seq(false) ++ (0 until 8).map(i => ((b & 0xff) & (1 << i)) != 0) ++ Seq(true)
+        val bits = Seq(false) ++ (0 until 8).map(i =>
+          ((b & 0xff) & (1 << i)) != 0
+        ) ++ Seq(true)
         for (bit <- bits) {
           c.io.uartRx.poke(bit.B)
           for (_ <- 0 until clocksPerBit) tick()
@@ -56,19 +65,32 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
         waited += 1
       }
       for (_ <- 0 until 2 * 10 * clocksPerBit) tick()
-      assert(received.toSeq == expected, s"Unexpected UART response: ${received.toSeq}")
+      assert(
+        received.toSeq == expected,
+        s"Unexpected UART response: ${received.toSeq}"
+      )
     }
   }
 
   "AcceleratorTop" should "connect UART RX through the core to unmodified UART TX" in {
-    exchange(JsonPathConfig(Seq(Seq("v"))), "{\"v\":1}\n", Seq(':'.toInt, '1'.toInt))
+    exchange(
+      JsonPathConfig(Seq(Seq("v"))),
+      "{\"v\":1}\n",
+      Seq(':'.toInt, '1'.toInt)
+    )
   }
 
   it should "send a number frame over UART" in {
     // -12.5 is mantissa 125 with exp10 -1. Flags: negative and isFloat.
-    exchange(JsonPathConfig(Seq(Seq("v")), attributeId = 7, valueType = ValueType.Number),
+    exchange(
+      JsonPathConfig(
+        Seq(Seq("v")),
+        attributeId = 7,
+        valueType = ValueType.Number
+      ),
       "{\"v\":-12.5}\n",
-      Seq(7, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff))
+      Seq(7, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff)
+    )
   }
 
   it should "extract every configured path through the whole UART pipeline" in {

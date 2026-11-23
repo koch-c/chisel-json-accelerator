@@ -13,8 +13,12 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   ) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
 
   val stackPointer = UInt(stackPointerWidth.W) // Points to where in the stack
-  val stack = Vec(maxDepth + 1, UInt(stateWidth.W)) // The stack holding values corresponding to how far a key is matched.
-  val projecting = Bool() // If we have found a colon and we project we're gonna find the value.
+  val stack = Vec(
+    maxDepth + 1,
+    UInt(stateWidth.W)
+  ) // The stack holding values corresponding to how far a key is matched.
+  val projecting =
+    Bool() // If we have found a colon and we project we're gonna find the value.
   val colonAddress = UInt(12.W) // The address of the current colon.
   val found = Bool() // If any of the requested keys are found.
   val done = Bool() // Done is set when the outer most } or ] is found.
@@ -78,8 +82,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val pendingDescriptorBits = Reg(new AttributeDescriptor)
   val pendingEndOfRecord = RegInit(false.B)
 
-  /**
-    * Transition.
+  /** Transition.
     *
     * @param current
     * @param symbol
@@ -128,59 +131,64 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
           ) := 0.U
         }
       }
-      //When the symbol is a key and the stackpointer is further along that 0th index.
-      .elsewhen(symbol.kind === SymbolKind.Key) {
-        when(current.stackPointer =/= 0.U) {
-          next.stack(tosIndex) := Mux(hasTransition, targetState, 0.U) // If theres a valid transition we set the top of the stack to targetState.
-          // If theres a transition and the the targetState is one of the terminalStates we have found a match.
-          when(
-            hasTransition && terminalStates.toSeq
-              .map(id => targetState === id.U(stateWidth.W))
-              .foldLeft(false.B)(_ || _)
-          ) {
-            next.found := true.B
+        // When the symbol is a key and the stackpointer is further along that 0th index.
+        .elsewhen(symbol.kind === SymbolKind.Key) {
+          when(current.stackPointer =/= 0.U) {
+            next.stack(tosIndex) := Mux(
+              hasTransition,
+              targetState,
+              0.U
+            ) // If theres a valid transition we set the top of the stack to targetState.
+            // If theres a transition and the the targetState is one of the terminalStates we have found a match.
+            when(
+              hasTransition && terminalStates.toSeq
+                .map(id => targetState === id.U(stateWidth.W))
+                .foldLeft(false.B)(_ || _)
+            ) {
+              next.found := true.B
+            }
           }
         }
-      }
-      // If the symbol is a colon and the it is terminal, we know a value has to be captured. Thus set projecting and colon address.
-      .elsewhen(symbol.kind === SymbolKind.Colon) {
-        when(isTerminal) {
-          next.projecting := true.B
-          next.colonAddress := symbol.addr
-        }
-      }
-      // If the symbol is a comma and we're currently looking in a value, it means we're done looking sp we can set the project flag. And calculate the value size.
-      .elsewhen(symbol.kind === SymbolKind.Comma) {
-        when(current.projecting) {
-          project := true.B
-          projectAddress := current.colonAddress
-          projectLength := symbol.addr - current.colonAddress
-          next.projecting := false.B
-        }
-        //If the stackpointer is not 0, we inject a zero in the stack.
-        when(current.stackPointer =/= 0.U) {
-          next.stack(tosIndex) := 0.U
-        }
-      // If the symbol is either '}' or ']' and we're currently projecting, we set the projecting falg false and project true and calculate value length.
-      }.elsewhen(
-        symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose
-      ) {
-        when(current.projecting) {
-          project := true.B
-          projectAddress := current.colonAddress
-          projectLength := symbol.addr - current.colonAddress
-          next.projecting := false.B
-        }
-        // If the stackpointer is progressed, we remove one from the stackpointer.
-        // Unless the stackpoiter is already at 1 in which the program is done.
-        when(current.stackPointer =/= 0.U) {
-          next.stackPointer := current.stackPointer - 1.U
-          when(current.stackPointer === 1.U) {
-            next.done := true.B
-            endOfRecord := true.B
+        // If the symbol is a colon and the it is terminal, we know a value has to be captured. Thus set projecting and colon address.
+        .elsewhen(symbol.kind === SymbolKind.Colon) {
+          when(isTerminal) {
+            next.projecting := true.B
+            next.colonAddress := symbol.addr
           }
         }
-      }
+        // If the symbol is a comma and we're currently looking in a value, it means we're done looking sp we can set the project flag. And calculate the value size.
+        .elsewhen(symbol.kind === SymbolKind.Comma) {
+          when(current.projecting) {
+            project := true.B
+            projectAddress := current.colonAddress
+            projectLength := symbol.addr - current.colonAddress
+            next.projecting := false.B
+          }
+          // If the stackpointer is not 0, we inject a zero in the stack.
+          when(current.stackPointer =/= 0.U) {
+            next.stack(tosIndex) := 0.U
+          }
+          // If the symbol is either '}' or ']' and we're currently projecting, we set the projecting falg false and project true and calculate value length.
+        }
+        .elsewhen(
+          symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose
+        ) {
+          when(current.projecting) {
+            project := true.B
+            projectAddress := current.colonAddress
+            projectLength := symbol.addr - current.colonAddress
+            next.projecting := false.B
+          }
+          // If the stackpointer is progressed, we remove one from the stackpointer.
+          // Unless the stackpoiter is already at 1 in which the program is done.
+          when(current.stackPointer =/= 0.U) {
+            next.stackPointer := current.stackPointer - 1.U
+            when(current.stackPointer === 1.U) {
+              next.done := true.B
+              endOfRecord := true.B
+            }
+          }
+        }
     }
 
     (next, project, projectAddress, projectLength, endOfRecord)

@@ -1,8 +1,8 @@
 import chisel3._
 
-/** UART wrapper around the byte-stream extractor.
-  * Send one JSON object line at a time; each line including LF must fit in
-  * 4096 bytes. UART has no flow control. TX adds no framing to the raw output.
+/** UART wrapper around the byte-stream extractor. Send one JSON object line at
+  * a time; each line including LF must fit in 4096 bytes. UART has no flow
+  * control. TX adds no framing to the raw output.
   */
 class AcceleratorTop(
     config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature"))),
@@ -26,7 +26,12 @@ class AcceleratorTop(
 
 object GenerateAcceleratorTop extends App {
   emitVerilog(
-    new AcceleratorTop(JsonPathConfig(Seq(Seq("sensor", "temperature")), valueType = ValueType.Number)),
+    new AcceleratorTop(
+      JsonPathConfig(
+        Seq(Seq("sensor", "temperature")),
+        valueType = ValueType.Number
+      )
+    ),
     Array("--target-dir", "generated")
   )
 }
