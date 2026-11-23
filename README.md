@@ -101,3 +101,32 @@ We very quickly designed, synthesized, implemented and ran the first MVP on the 
 
 Once we had completed the MVP 2 and made it run on the FPGA board, we processed to implement the final version of JAW. 
 <!-- TODO: describe how we first designed the first part followed by the two parsers and filtering logic -->
+
+
+# Stuff we need to add to readme 
+AI and LLM Usage
+
+# Stuff we probably should present
+
+- What is the biggest remaining uncertainty in our project?
+
+Four questions about our design:
+- Behavior: Does it do what the specification says?
+- Structure: Did we generate the intended hardware?
+- Cost: Does it meet our resource and timing targets?
+- Evidence: Can someone else reproduce our results?
+- Passing simulation is not the final answer
+
+Memory
+- What memory are you using?
+- How many FFs?
+- How many block RAMs?
+- Any LUTs used as memory?
+
+▶Test your configurations:
+▶The smallest supported configuration
+▶A typical configuration
+▶A non-power-of-two size, if supported
+▶Optional features enabled and disabled
+▶Illegal configurations, which should be rejected clearly
+
