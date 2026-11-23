@@ -4,11 +4,22 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
 class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
-  private case class TestSymbol(kind: SymbolKind.Type, address: Int, keyId: Int = 0)
-  private case class Result(attributeId: BigInt, address: BigInt, length: BigInt)
+  private case class TestSymbol(
+      kind: SymbolKind.Type,
+      address: Int,
+      keyId: Int = 0
+  )
+  private case class Result(
+      attributeId: BigInt,
+      address: BigInt,
+      length: BigInt
+  )
 
-  private def send(c: PushdownAutomaton, symbols: Seq[TestSymbol], config: JsonPathConfig)
-      : (Seq[Result], Int) = {
+  private def send(
+      c: PushdownAutomaton,
+      symbols: Seq[TestSymbol],
+      config: JsonPathConfig
+  ): (Seq[Result], Int) = {
     val results = scala.collection.mutable.ArrayBuffer.empty[Result]
     var endOfRecords = 0
     val keyIdWidth = math.max(1, chisel3.util.log2Ceil(config.keyIds.size))
@@ -50,7 +61,10 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
     TestSymbol(SymbolKind.Key, addr, config.keyIds(name))
 
   "PushdownAutomaton" should "send a loader descriptor for the requested nested path" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"), attributeId = 7)
+    val config = JsonPathConfig(
+      Seq(Seq("device", "location", "latitude")),
+      attributeId = 7
+    )
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -77,7 +91,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "ignore a key symbol outside the requested nesting context" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"))
+    val config = JsonPathConfig(Seq(Seq("device", "location", "latitude")))
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -98,9 +112,8 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "match alternative paths that share a root, like $.(id | user.name)" in {
     val config = JsonPathConfig(
-      path = Seq("id"),
-      attributeId = 4,
-      additionalPaths = Seq(Seq("user", "name"))
+      paths = Seq(Seq("id"), Seq("user", "name")),
+      attributeId = 4
     )
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
@@ -126,7 +139,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "hold the loader descriptor stable while the loader is stalled" in {
-    val config = JsonPathConfig(Seq("temperature"), attributeId = 3)
+    val config = JsonPathConfig(Seq(Seq("temperature")), attributeId = 3)
     test(new PushdownAutomaton(config)) { c =>
       c.io.descriptor.ready.poke(false.B)
       val symbols = Seq(
@@ -169,7 +182,10 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "connect directly to the two-symbol ChannelFifo output" in {
-    val config = JsonPathConfig(Seq("device", "location", "latitude"), attributeId = 7)
+    val config = JsonPathConfig(
+      Seq(Seq("device", "location", "latitude")),
+      attributeId = 7
+    )
     test(new PdaFifoHarness(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -214,7 +230,8 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
           c.io.in.valid.poke(false.B)
         }
 
-        if (sent < batches.length && c.io.in.ready.peek().litToBoolean) sent += 1
+        if (sent < batches.length && c.io.in.ready.peek().litToBoolean)
+          sent += 1
         if (c.io.descriptor.valid.peek().litToBoolean) {
           descriptors += Result(
             c.io.descriptor.bits.attributeId.peek().litValue,
@@ -227,7 +244,10 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
         cycles += 1
       }
 
-      assert(sent == batches.length, "ChannelFifo did not accept all symbol batches")
+      assert(
+        sent == batches.length,
+        "ChannelFifo did not accept all symbol batches"
+      )
       assert(sawEndOfRecord, "PDA did not signal end of record")
       assert(descriptors.toSeq == Seq(Result(7, 33, 5)))
     }
@@ -238,7 +258,9 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
 class PdaFifoHarness(config: JsonPathConfig) extends Module {
   private val numKeys = config.keyIds.size
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new ChannelBatch(new JsonSymbol(numKeys, 12), width = 8)))
+    val in = Flipped(
+      Decoupled(new ChannelBatch(new JsonSymbol(numKeys, 12), width = 8))
+    )
     val descriptor = Decoupled(new AttributeDescriptor)
     val endOfRecord = Output(Bool())
   })

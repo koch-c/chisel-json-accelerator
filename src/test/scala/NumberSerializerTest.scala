@@ -3,19 +3,36 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
 class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
+
   /** The 12 bytes expected for a number, following the frame layout. */
-  def frame(id: Int, negative: Boolean, isFloat: Boolean, overflow: Boolean,
-            value: BigInt, exp10: Int, notANumber: Boolean = false): Seq[Int] = {
-    val flags = (if (negative) 1 else 0) | (if (isFloat) 2 else 0) | (if (overflow) 4 else 0) |
+  def frame(
+      id: Int,
+      negative: Boolean,
+      isFloat: Boolean,
+      overflow: Boolean,
+      value: BigInt,
+      exp10: Int,
+      notANumber: Boolean = false
+  ): Seq[Int] = {
+    val flags = (if (negative) 1 else 0) | (if (isFloat) 2
+                                            else 0) | (if (overflow) 4 else 0) |
       (if (notANumber) 8 else 0)
     Seq(id, flags) ++
       (0 until 8).map(i => ((value >> (8 * i)) & 0xff).toInt) ++
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
 
-  def submit(c: NumberSerializer, id: Int, negative: Boolean, integer: BigInt,
-             mantissa: BigInt, exp10: Int, isFloat: Boolean, overflow: Boolean,
-             notANumber: Boolean = false): Unit = {
+  def submit(
+      c: NumberSerializer,
+      id: Int,
+      negative: Boolean,
+      integer: BigInt,
+      mantissa: BigInt,
+      exp10: Int,
+      isFloat: Boolean,
+      overflow: Boolean,
+      notANumber: Boolean = false
+  ): Unit = {
     c.io.in.ready.expect(true.B)
     c.io.in.bits.attributeId.poke(id.U)
     c.io.in.bits.negative.poke(negative.B)
@@ -30,7 +47,11 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.in.valid.poke(false.B)
   }
 
-  def collect(c: NumberSerializer, expected: Seq[Int], stall: Boolean = false): Unit = {
+  def collect(
+      c: NumberSerializer,
+      expected: Seq[Int],
+      stall: Boolean = false
+  ): Unit = {
     for ((byte, index) <- expected.zipWithIndex) {
       c.io.out.valid.expect(true.B)
       c.io.in.ready.expect(false.B)
@@ -65,16 +86,42 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "send an integer as a 12-byte frame" in {
     test(new NumberSerializer) { c =>
-      submit(c, id = 3, negative = false, integer = 25, mantissa = 99, exp10 = 0,
-        isFloat = false, overflow = false)
-      collect(c, frame(3, negative = false, isFloat = false, overflow = false, value = 25, exp10 = 0))
+      submit(
+        c,
+        id = 3,
+        negative = false,
+        integer = 25,
+        mantissa = 99,
+        exp10 = 0,
+        isFloat = false,
+        overflow = false
+      )
+      collect(
+        c,
+        frame(
+          3,
+          negative = false,
+          isFloat = false,
+          overflow = false,
+          value = 25,
+          exp10 = 0
+        )
+      )
     }
   }
 
   it should "send the mantissa and a negative exponent for a float" in {
     test(new NumberSerializer) { c =>
-      submit(c, id = 7, negative = true, integer = 12, mantissa = 1234, exp10 = -2,
-        isFloat = true, overflow = false)
+      submit(
+        c,
+        id = 7,
+        negative = true,
+        integer = 12,
+        mantissa = 1234,
+        exp10 = -2,
+        isFloat = true,
+        overflow = false
+      )
       collect(c, Seq(7, 3, 0xd2, 0x04, 0, 0, 0, 0, 0, 0, 0xfe, 0xff))
     }
   }
@@ -82,39 +129,108 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "send every value byte least significant first" in {
     test(new NumberSerializer) { c =>
       val value = BigInt("0102030405060708", 16)
-      submit(c, id = 255, negative = false, integer = value, mantissa = 0, exp10 = 0,
-        isFloat = false, overflow = true)
+      submit(
+        c,
+        id = 255,
+        negative = false,
+        integer = value,
+        mantissa = 0,
+        exp10 = 0,
+        isFloat = false,
+        overflow = true
+      )
       collect(c, Seq(255, 4, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0))
     }
   }
 
   it should "hold each byte stable under backpressure and accept a second number" in {
     test(new NumberSerializer) { c =>
-      submit(c, id = 1, negative = false, integer = 0, mantissa = 5, exp10 = -3,
-        isFloat = true, overflow = false)
-      collect(c, frame(1, negative = false, isFloat = true, overflow = false, value = 5, exp10 = -3),
-        stall = true)
-      submit(c, id = 2, negative = true, integer = 7, mantissa = 0, exp10 = 0,
-        isFloat = false, overflow = false)
-      collect(c, frame(2, negative = true, isFloat = false, overflow = false, value = 7, exp10 = 0))
+      submit(
+        c,
+        id = 1,
+        negative = false,
+        integer = 0,
+        mantissa = 5,
+        exp10 = -3,
+        isFloat = true,
+        overflow = false
+      )
+      collect(
+        c,
+        frame(
+          1,
+          negative = false,
+          isFloat = true,
+          overflow = false,
+          value = 5,
+          exp10 = -3
+        ),
+        stall = true
+      )
+      submit(
+        c,
+        id = 2,
+        negative = true,
+        integer = 7,
+        mantissa = 0,
+        exp10 = 0,
+        isFloat = false,
+        overflow = false
+      )
+      collect(
+        c,
+        frame(
+          2,
+          negative = true,
+          isFloat = false,
+          overflow = false,
+          value = 7,
+          exp10 = 0
+        )
+      )
     }
   }
 
   it should "send notANumber as flag bit 3" in {
     test(new NumberSerializer) { c =>
-      submit(c, id = 9, negative = false, integer = 0, mantissa = 0, exp10 = 0,
-        isFloat = false, overflow = false, notANumber = true)
+      submit(
+        c,
+        id = 9,
+        negative = false,
+        integer = 0,
+        mantissa = 0,
+        exp10 = 0,
+        isFloat = false,
+        overflow = false,
+        notANumber = true
+      )
       collect(c, Seq(9, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
   }
 
   /** The frame for an integer type: header, then the value in `bytes` bytes. */
   def intFrame(id: Int, flags: Int, value: BigInt, bytes: Int): Seq[Int] =
-    Seq(id, flags) ++ (0 until bytes).map(i => ((value >> (8 * i)) & 0xff).toInt)
+    Seq(id, flags) ++ (0 until bytes).map(i =>
+      ((value >> (8 * i)) & 0xff).toInt
+    )
 
-  def submitInt(c: NumberSerializer, id: Int, negative: Boolean, magnitude: BigInt,
-                isFloat: Boolean = false): Unit =
-    submit(c, id, negative, magnitude, mantissa = 0, exp10 = 0, isFloat = isFloat, overflow = false)
+  def submitInt(
+      c: NumberSerializer,
+      id: Int,
+      negative: Boolean,
+      magnitude: BigInt,
+      isFloat: Boolean = false
+  ): Unit =
+    submit(
+      c,
+      id,
+      negative,
+      magnitude,
+      mantissa = 0,
+      exp10 = 0,
+      isFloat = isFloat,
+      overflow = false
+    )
 
   it should "send an Int32 in two's complement" in {
     test(new NumberSerializer(ValueType.Int32)) { c =>

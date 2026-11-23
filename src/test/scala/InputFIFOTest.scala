@@ -40,7 +40,10 @@ class InputFIFOSpec extends AnyFlatSpec with ChiselScalatestTester {
         if (accepted) sent += 1
         cycles += 1
       }
-      assert(sent == input.size && received == expected.size, "FIFO did not drain")
+      assert(
+        sent == input.size && received == expected.size,
+        "FIFO did not drain"
+      )
       c.io.in.valid.poke(false.B)
       c.io.out.ready.poke(true.B)
       c.clock.step(3)

@@ -3,26 +3,33 @@ import chisel3.util._
 
 /** PDA state used to calculate two ChannelFifo symbol transitions per cycle. */
 class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
-  private val stateWidth = math.max(1, log2Ceil(pathLength + 1)) // Path length is the amount of keys in the jsonPath, in sensor.temperature it would be log2(2 + 1).Which in this case would return 2 because 3 values can be expressed on 2 bits.
-  private val stackPointerWidth = math.max(1, log2Ceil(maxDepth + 1)) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
+  private val stateWidth = math.max(
+    1,
+    log2Ceil(pathLength + 1)
+  ) // Path length is the amount of keys in the jsonPath, in sensor.temperature it would be log2(2 + 1).Which in this case would return 2 because 3 values can be expressed on 2 bits.
+  private val stackPointerWidth = math.max(
+    1,
+    log2Ceil(maxDepth + 1)
+  ) // The width of the stackPointer has to hold up to the depth. Meaning, it would need maxDepth + 1 in bits.
 
-  // Slot 0 is the root state `$`; each open bracket pushes a new TOS slot.
-  val stackPointer = UInt(stackPointerWidth.W)
-  val stack = Vec(maxDepth + 1, UInt(stateWidth.W)) // The stack holding
-  val projecting = Bool()
-  val colonAddress = UInt(12.W)
-  val found = Bool()
-  val done = Bool()
+  val stackPointer = UInt(stackPointerWidth.W) // Points to where in the stack
+  val stack = Vec(
+    maxDepth + 1,
+    UInt(stateWidth.W)
+  ) // The stack holding values corresponding to how far a key is matched.
+  val projecting =
+    Bool() // If we have found a colon and we project we're gonna find the value.
+  val colonAddress = UInt(12.W) // The address of the current colon.
+  val found = Bool() // If any of the requested keys are found.
+  val done = Bool() // Done is set when the outer most } or ] is found.
 }
 
-/**
-  * Pushdown automaton for one fixed key path, using the interfaces from the
+/** Pushdown automaton for configured key paths, using the interfaces from the
   * Lexer and attribute-loader branches. The Lexer recognizes key strings and
   * emits `JsonSymbol`s; this module only tracks path state and JSON nesting.
   */
 class PushdownAutomaton(config: JsonPathConfig) extends Module {
-  private val path = config.path
-  private val paths = config.allPaths
+  private val paths = config.paths
   private val maxDepth = config.maxDepth
   private val keyIds = config.keyIds
   private val keyIdWidth = math.max(1, log2Ceil(keyIds.size max 2))
@@ -32,9 +39,11 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     paths.foreach { candidate =>
       var parent = 0
       candidate.foreach { key =>
-        builtEdges.find(edge => edge._1 == parent && edge._2 == keyIds(key)) match {
+        builtEdges.find(edge =>
+          edge._1 == parent && edge._2 == keyIds(key)
+        ) match {
           case Some((_, _, child)) => parent = child
-          case None =>
+          case None                =>
             builtEdges += ((parent, keyIds(key), nextState))
             parent = nextState
             nextState += 1
@@ -43,7 +52,10 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     }
     val terminals = paths.map { candidate =>
       candidate.foldLeft(0) { (parent, key) =>
-        builtEdges.find(edge => edge._1 == parent && edge._2 == keyIds(key)).get._3
+        builtEdges
+          .find(edge => edge._1 == parent && edge._2 == keyIds(key))
+          .get
+          ._3
       }
     }.toSet
     (builtEdges.toSeq, nextState, terminals)
@@ -70,10 +82,17 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val pendingDescriptorBits = Reg(new AttributeDescriptor)
   val pendingEndOfRecord = RegInit(false.B)
 
+  /** Transition.
+    *
+    * @param current
+    * @param symbol
+    * @param symbolValid
+    * @return
+    */
   private def transition(
-    current: PdaState,
-    symbol: JsonSymbol,
-    symbolValid: Bool
+      current: PdaState,
+      symbol: JsonSymbol,
+      symbolValid: Bool
   ): (PdaState, Bool, UInt, UInt, Bool) = {
     val next = Wire(new PdaState(trieStateCount - 1, maxDepth))
     next := current
@@ -83,69 +102,99 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     val endOfRecord = WireDefault(false.B)
 
     // A key transition is selected from TOS-1 and writes its target into TOS.
-    val parentIndex = Mux(current.stackPointer === 0.U, 0.U, current.stackPointer - 1.U)
-      (stackPointerWidth - 1, 0)
+    val parentIndex =
+      Mux(current.stackPointer === 0.U, 0.U, current.stackPointer - 1.U)
+    (stackPointerWidth - 1, 0)
     val parentState = current.stack(parentIndex)
     val tosIndex = current.stackPointer(stackPointerWidth - 1, 0)
     val keyTransitions = edges.map { case (parent, keyId, _) =>
-      (symbol.keyId === keyId.U(keyIdWidth.W)) && (parentState === parent.U(stateWidth.W))
+      (symbol.keyId === keyId.U(keyIdWidth.W)) && (parentState === parent.U(
+        stateWidth.W
+      ))
     }
     val hasTransition = keyTransitions.foldLeft(false.B)(_ || _)
     val targetState = Mux1H(keyTransitions, edges.map(_._3.U(stateWidth.W)))
-    val isTerminal = terminalStates.toSeq.map(id => current.stack(tosIndex) === id.U(stateWidth.W))
+    val isTerminal = terminalStates.toSeq
+      .map(id => current.stack(tosIndex) === id.U(stateWidth.W))
       .foldLeft(false.B)(_ || _)
 
+    // When a valid symbol exists within the entries.
     when(symbolValid) {
-      when(symbol.kind === SymbolKind.ObjOpen || symbol.kind === SymbolKind.ArrOpen) {
+      // if the symbol is either '{' or '[' and the stackpointer is not at the maxDepth. We can move the stackpointer and add a new entry of 0.
+      when(
+        symbol.kind === SymbolKind.ObjOpen || symbol.kind === SymbolKind.ArrOpen
+      ) {
         when(current.stackPointer < maxDepth.U) {
           next.stackPointer := current.stackPointer + 1.U
-          next.stack((current.stackPointer + 1.U)(stackPointerWidth - 1, 0)) := 0.U
-        }
-      }.elsewhen(symbol.kind === SymbolKind.Key) {
-        when(current.stackPointer =/= 0.U) {
-          next.stack(tosIndex) := Mux(hasTransition, targetState, 0.U)
-          when(hasTransition && terminalStates.toSeq.map(id => targetState === id.U(stateWidth.W)).foldLeft(false.B)(_ || _)) {
-            next.found := true.B
-          }
-        }
-      }.elsewhen(symbol.kind === SymbolKind.Colon) {
-        when(isTerminal) {
-          // The paper defines the first colon after a terminal path as start.
-          next.projecting := true.B
-          next.colonAddress := symbol.addr
-        }
-      }.elsewhen(symbol.kind === SymbolKind.Comma) {
-        when(current.projecting) {
-          project := true.B
-          projectAddress := current.colonAddress
-          projectLength := symbol.addr - current.colonAddress
-          next.projecting := false.B
-        }
-        when(current.stackPointer =/= 0.U) {
-          next.stack(tosIndex) := 0.U
-        }
-      }.elsewhen(symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose) {
-        when(current.projecting) {
-          project := true.B
-          projectAddress := current.colonAddress
-          projectLength := symbol.addr - current.colonAddress
-          next.projecting := false.B
-        }
-        when(current.stackPointer =/= 0.U) {
-          next.stackPointer := current.stackPointer - 1.U
-          when(current.stackPointer === 1.U) {
-            next.done := true.B
-            endOfRecord := true.B
-          }
+          next.stack(
+            (current.stackPointer + 1.U)(stackPointerWidth - 1, 0)
+          ) := 0.U
         }
       }
+        // When the symbol is a key and the stackpointer is further along that 0th index.
+        .elsewhen(symbol.kind === SymbolKind.Key) {
+          when(current.stackPointer =/= 0.U) {
+            next.stack(tosIndex) := Mux(
+              hasTransition,
+              targetState,
+              0.U
+            ) // If theres a valid transition we set the top of the stack to targetState.
+            // If theres a transition and the the targetState is one of the terminalStates we have found a match.
+            when(
+              hasTransition && terminalStates.toSeq
+                .map(id => targetState === id.U(stateWidth.W))
+                .foldLeft(false.B)(_ || _)
+            ) {
+              next.found := true.B
+            }
+          }
+        }
+        // If the symbol is a colon and the it is terminal, we know a value has to be captured. Thus set projecting and colon address.
+        .elsewhen(symbol.kind === SymbolKind.Colon) {
+          when(isTerminal) {
+            next.projecting := true.B
+            next.colonAddress := symbol.addr
+          }
+        }
+        // If the symbol is a comma and we're currently looking in a value, it means we're done looking sp we can set the project flag. And calculate the value size.
+        .elsewhen(symbol.kind === SymbolKind.Comma) {
+          when(current.projecting) {
+            project := true.B
+            projectAddress := current.colonAddress
+            projectLength := symbol.addr - current.colonAddress
+            next.projecting := false.B
+          }
+          // If the stackpointer is not 0, we inject a zero in the stack.
+          when(current.stackPointer =/= 0.U) {
+            next.stack(tosIndex) := 0.U
+          }
+          // If the symbol is either '}' or ']' and we're currently projecting, we set the projecting falg false and project true and calculate value length.
+        }
+        .elsewhen(
+          symbol.kind === SymbolKind.ObjClose || symbol.kind === SymbolKind.ArrClose
+        ) {
+          when(current.projecting) {
+            project := true.B
+            projectAddress := current.colonAddress
+            projectLength := symbol.addr - current.colonAddress
+            next.projecting := false.B
+          }
+          // If the stackpointer is progressed, we remove one from the stackpointer.
+          // Unless the stackpoiter is already at 1 in which the program is done.
+          when(current.stackPointer =/= 0.U) {
+            next.stackPointer := current.stackPointer - 1.U
+            when(current.stackPointer === 1.U) {
+              next.done := true.B
+              endOfRecord := true.B
+            }
+          }
+        }
     }
 
     (next, project, projectAddress, projectLength, endOfRecord)
   }
 
-  // A FIFO batch may contain one or two symbols. The second sees the first's
-  // state updates, just like the two serial s_proc stages in the paper.
+  // Two concurrent symbols are processed. The valid entry, says within the entries are there a valid symbol.
   val valid0 = io.in.valid && io.in.bits.count > 0.U
   val valid1 = io.in.valid && io.in.bits.count > 1.U
   val (after0, project0, address0, length0, eor0) =

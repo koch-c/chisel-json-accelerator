@@ -9,14 +9,13 @@ import chisel3.util._
   *
   * The frame is streamed while the string is read, so nothing is buffered:
   *
-  *   byte 0      attribute id
-  *   bytes 1..n  the decoded string, without the quotes (n may be 0)
-  *   byte n+1    0x00 terminator
-  *   byte n+2    flags: bit 0 notAString, bit 1 badEscape
+  * byte 0 attribute id bytes 1..n the decoded string, without the quotes (n may
+  * be 0) byte n+1 0x00 terminator byte n+2 flags: bit 0 notAString, bit 1
+  * badEscape
   *
   * The escapes \" \\ \/ \b \f \n \r \t are decoded. \\uXXXX is not: it sets
-  * badEscape, as does any unknown escape, and the character after the
-  * backslash is sent as it is. The string should then not be used.
+  * badEscape, as does any unknown escape, and the character after the backslash
+  * is sent as it is. The string should then not be used.
   *
   * notAString is set when the attribute is not exactly one string: no opening
   * or closing quote, other characters than whitespace around the string, or a
@@ -39,7 +38,8 @@ class StringParser extends Module {
   // after:      the closing quote has been seen
   // terminator: send 0x00
   // flags:      send the flags byte
-  val header :: start :: body :: escape :: after :: terminator :: flags :: Nil = Enum(7)
+  val header :: start :: body :: escape :: after :: terminator :: flags :: Nil =
+    Enum(7)
   val state = RegInit(header)
 
   val char = io.in.bits.data
@@ -48,7 +48,10 @@ class StringParser extends Module {
   val isQuote = char === ch('"')
   val isBackslash = char === ch('\\')
   val isColon = char === ch(':')
-  val isWhitespace = char === ch(' ') || char === ch('\t') || char === ch('\n') || char === ch('\r')
+  val isWhitespace =
+    char === ch(' ') || char === ch('\t') || char === ch('\n') || char === ch(
+      '\r'
+    )
   val isControl = char < 0x20.U
 
   val notAStringR = RegInit(false.B)
@@ -65,14 +68,19 @@ class StringParser extends Module {
     'r' -> '\r',
     't' -> '\t'
   )
-  val isKnownEscape = escapes.map { case (letter, _) => char === ch(letter) }.reduce(_ || _)
-  val unescaped = MuxLookup(char, char)(escapes.map { case (letter, value) => ch(letter) -> ch(value) })
+  val isKnownEscape =
+    escapes.map { case (letter, _) => char === ch(letter) }.reduce(_ || _)
+  val unescaped = MuxLookup(char, char)(escapes.map { case (letter, value) =>
+    ch(letter) -> ch(value)
+  })
 
   // Whether the current input byte puts a byte on the output.
-  val emits = MuxLookup(state, false.B)(Seq(
-    body -> (!isQuote && !isBackslash && !isControl),
-    escape -> !isControl
-  ))
+  val emits = MuxLookup(state, false.B)(
+    Seq(
+      body -> (!isQuote && !isBackslash && !isControl),
+      escape -> !isControl
+    )
+  )
 
   // An input byte gives at most one output byte, so the two handshakes are
   // tied together: a byte that is sent is only consumed when it is accepted.

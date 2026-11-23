@@ -7,11 +7,15 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
   val badEscape = 2
 
   /** Drives the input and collects the frames accepted on the output.
-    * stallOutput is the number of cycles a valid byte is held back before it
-    * is accepted, to exercise backpressure. inputGap is the number of idle
-    * cycles between two input bytes.
+    * stallOutput is the number of cycles a valid byte is held back before it is
+    * accepted, to exercise backpressure. inputGap is the number of idle cycles
+    * between two input bytes.
     */
-  private class Driver(c: StringParser, stallOutput: Int = 0, inputGap: Int = 0) {
+  private class Driver(
+      c: StringParser,
+      stallOutput: Int = 0,
+      inputGap: Int = 0
+  ) {
     val frames = scala.collection.mutable.ArrayBuffer.empty[Seq[Int]]
     private val current = scala.collection.mutable.ArrayBuffer.empty[Int]
     private var stalled = 0
@@ -37,12 +41,14 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       } else if (valid) {
         stalled += 1
       }
-      val taken = c.io.in.valid.peek().litToBoolean && c.io.in.ready.peek().litToBoolean
+      val taken =
+        c.io.in.valid.peek().litToBoolean && c.io.in.ready.peek().litToBoolean
       c.clock.step()
       taken
     }
 
-    /** Sends the attribute bytes one at a time, with `last` on the final byte. */
+    /** Sends the attribute bytes one at a time, with `last` on the final byte.
+      */
     def feed(text: String, id: Int): Unit = {
       val bytes = text.getBytes("UTF-8")
       for ((byte, index) <- bytes.zipWithIndex) {
@@ -69,8 +75,10 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
         waited += 1
       }
       for (_ <- 0 until 4) tick()
-      assert(frames.size == before + 1,
-        s"Expected exactly one frame for '$text', got ${frames.size - before}")
+      assert(
+        frames.size == before + 1,
+        s"Expected exactly one frame for '$text', got ${frames.size - before}"
+      )
       assert(current.isEmpty, s"Bytes after the frame for '$text': $current")
       frames.last
     }
@@ -80,7 +88,13 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
   private def frame(id: Int, text: String, flags: Int = 0): Seq[Int] =
     Seq(id) ++ text.getBytes("UTF-8").map(_ & 0xff) ++ Seq(0, flags)
 
-  private def check(d: Driver, attribute: String, text: String, flags: Int = 0, id: Int = 0): Unit = {
+  private def check(
+      d: Driver,
+      attribute: String,
+      text: String,
+      flags: Int = 0,
+      id: Int = 0
+  ): Unit = {
     val got = d.parse(attribute, id)
     assert(got == frame(id, text, flags), s"for '$attribute'")
   }
@@ -130,8 +144,16 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "tell an escaped quote from the closing quote" in {
     test(new StringParser) { c =>
       val d = new Driver(c)
-      check(d, ":\"a\\\\\"", "a\\") // "a\\" : escaped backslash, then the closing quote
-      check(d, ":\"a\\\"\"", "a\"") // "a\"" : escaped quote, then the closing quote
+      check(
+        d,
+        ":\"a\\\\\"",
+        "a\\"
+      ) // "a\\" : escaped backslash, then the closing quote
+      check(
+        d,
+        ":\"a\\\"\"",
+        "a\""
+      ) // "a\"" : escaped quote, then the closing quote
       check(d, ":\"\\\\\\\"\"", "\\\"") // "\\\"" : both
     }
   }

@@ -37,10 +37,10 @@ config:
 ---
 flowchart LR
     RX[UartRx] --> INPUT[InputFIFO]
-    INPUT --> LEXER[Lexer]
-    LEXER --> FIFO[ChannelFifo]
-    FIFO --> PDA[PushdownAutomaton]
-    PDA -->|Value location| LOADER[AttributeLoader]
+    INPUT -->|8-byte words| LEXER[Parallel Lexer]
+    LEXER -->|Up to 8 symbols per batch| FIFO[ChannelFifo]
+    FIFO -->|Up to 2 symbols per cycle| PDA[PushdownAutomaton]
+    PDA -->|Value Info| LOADER[AttributeLoader]
     INPUT --> BUFFER[InputBuffer]
     BUFFER -->|Original value bytes| LOADER
     LOADER --> TX[UartTx]
@@ -48,13 +48,16 @@ flowchart LR
 
 - `UartRx` receives the JSON bytes from our computer over UART and passes them to the `InputFIFO`.
 - `InputFIFO` packs the incoming bytes into 8-byte words, adapting the byte-by-byte UART input to the wider input of the `Lexer`. The same words are also written to the `InputBuffer`, so we can retrieve the original values later.
-- `Lexer` identifies structural characters, keys, and values in the JSON and turns them into symbols. These symbols, along with their positions in the input, are passed to the `ChannelFifo`.
-- `ChannelFifo` queues the symbols from the `Lexer` and packs them into batches of up to two symbols for the `PushdownAutomaton`. It buffers symbols when the automaton cannot keep up, allowing the `Lexer` to continue working until the FIFO is full rather than waiting for each symbol to be processed.
+- `Lexer` examines all eight bytes of a word in parallel and can accept one word per cycle when unstalled. It carries string and escape state across word boundaries, then emits structural characters and recognized keys as symbols with their byte positions. Each output batch contains up to eight symbols in input order; words with no symbols produce no batch.
+- `ChannelFifo` buffers symbols, accepting batches of up to eight from the `Lexer` and delivering up to two symbols per cycle to the `PushdownAutomaton`. This absorbs bursts of symbols so the lexer only has to stall when the FIFO is full.
 - `PushdownAutomaton` uses a stack to keep track of the current path through the JSON and compares it with the query the FPGA has been synthesized to match. When it finds a matching value, it sends the value's location to the `AttributeLoader`.
 - `InputBuffer` stores the original JSON bytes while the symbols move through the parser. The `AttributeLoader` reads from this buffer to retrieve a matching value without having to reconstruct it from symbols.
 - `AttributeLoader` uses the location from the `PushdownAutomaton` to read the matching value from the `InputBuffer`. It then passes the original value bytes to `UartTx`.
 - `UartTx` sends the extracted value bytes back to our computer over UART, completing the flow.
-<!-- TODO: Change bullet point list to reflect parallelism in Lexer and add new components  -->
+<!-- TODO: Document the NumberParser and NumberSerializer output path. -->
+
+### Top Level Modules
+All the modules except the `UartTx/Rx` modules are wired together in the `Accelerator` module. The `AcceleratorTop` module wires the `Accelerator` module together with `UartTx/Rx`. The bulk of the integration test for the accelerator are written for the `Accelerator` module, while the test written for `AcceleratorTop` mostly test the Uart support. We have split up the modules like this, because it is slow to simulate Uart, and by isolating the Uart support to a different module, we can efficiently test the accelerator without interacting with Uart and without introducing unnecessary wires. 
 
 ## Agile Development
 We of courses implemented JAW with an Agile mindset. Every Thursday after class we had our weekly standups, where we talked about what tickets we had completed, what was blocking us, and we decided what we wanted to work on for the next spring. We organized ourselves through GitHub Projects in a kanban board
@@ -62,7 +65,7 @@ We of courses implemented JAW with an Agile mindset. Every Thursday after class 
 ![Kanban board on Github Projects](images/kanban-board.png)
 
 ### CI
-We used GitHub Actions in facilitate continuous integration. We started with a simple action that ran all chisel tests:
+We used GitHub Actions to facilitate continuous integration. We started with a simple action that ran all chisel tests:
 ```yaml
 jobs:
   test:
@@ -101,3 +104,6 @@ We very quickly designed, synthesized, implemented and ran the first MVP on the 
 
 Once we had completed the MVP 2 and made it run on the FPGA board, we processed to implement the final version of JAW. 
 <!-- TODO: describe how we first designed the first part followed by the two parsers and filtering logic -->
+
+# AI and LLM Usage
+We used LLM and coding harnesses to assist us in the development of JAW. We primarily focus on the architecture of JAW and created implementation plans. We then made agents create an implementation of our architecture plan, and we iterated over the generated code many times together with the agent, so the end result was efficient and was an implementation of what we required. When the agent was incapable of delivering, we implemented parts of the chisel code ourselves. We adopted this approach to try and learn the future of chip design, where agents increasingly will write the code for us, and the chip designers must be critic and validate the generated code.

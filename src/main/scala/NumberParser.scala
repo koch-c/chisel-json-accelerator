@@ -1,13 +1,14 @@
 import chisel3._
 import chisel3.util._
 
-/** Decimal parts of one parsed JSON number (SPEAR-JSON, Section III-C 2, Fig. 4).
+/** Decimal parts of one parsed JSON number (SPEAR-JSON, Section III-C 2, Fig.
+  * 4).
   *
-  * The value is  (-1)^negative * mantissa * 10^exp10.
-  *   "25"       -> integer = 25, isFloat = false
-  *   "12.34"    -> integer = 12, mantissa = 1234, exp10 = -2, isFloat = true
-  *   "-1.25e+2" -> negative, integer = 1, mantissa = 125, exp10 = 0, isFloat = true
-  * mantissa and exp10 are only meaningful when isFloat is set.
+  * The value is (-1)^negative * mantissa * 10^exp10. "25" -> integer = 25,
+  * isFloat = false "12.34" -> integer = 12, mantissa = 1234, exp10 = -2,
+  * isFloat = true "-1.25e+2" -> negative, integer = 1, mantissa = 125, exp10 =
+  * 0, isFloat = true mantissa and exp10 are only meaningful when isFloat is
+  * set.
   */
 class ParsedNumber extends Bundle {
   val attributeId = UInt(8.W)
@@ -24,7 +25,7 @@ class ParsedNumber extends Bundle {
   *
   * The input is the byte stream of a single attribute from the AttributeLoader.
   * It is not just the number: it starts at the colon and runs up to the next
-  * ',' or '}', e.g. ": 25" or ":-1.25e+2  ". The final byte has `last` set.
+  * ',' or '}', e.g. ": 25" or ":-1.25e+2 ". The final byte has `last` set.
   * Exactly one ParsedNumber is produced per attribute.
   *
   * Not part of this module (yet): the IEEE754 conversion, several parsers in
@@ -52,7 +53,10 @@ class NumberParser extends Module {
   val isPoint = char === ch('.')
   val isExp = char === ch('e') || char === ch('E')
   val isColon = char === ch(':')
-  val isWhitespace = char === ch(' ') || char === ch('\t') || char === ch('\n') || char === ch('\r')
+  val isWhitespace =
+    char === ch(' ') || char === ch('\t') || char === ch('\n') || char === ch(
+      '\r'
+    )
 
   // Registers of Fig. 4(b), with the paper's names.
   val accR = RegInit(0.U(64.W))
@@ -80,16 +84,16 @@ class NumberParser extends Module {
   io.out.bits.overflow := overflowR
   io.out.bits.notANumber := notANumberR
 
-
   // The written exponent is accumulated in accR as an unsigned value. Apply its
   // sign and add it to the fraction count that exp10R already holds.
   val expMagnitude = accR(14, 0).zext
-  val exp10WithExponent = Mux(eSignR, exp10R - expMagnitude, exp10R + expMagnitude)
+  val exp10WithExponent =
+    Mux(eSignR, exp10R - expMagnitude, exp10R + expMagnitude)
 
 // Control path based on figure 4a in the paper.
   when(io.in.fire) {
     switch(state) {
-      is(start) { //only move if the start of a number is registered.
+      is(start) { // only move if the start of a number is registered.
         when(isMinus) {
           state := sign
           signR := true.B // ps signal
@@ -131,30 +135,31 @@ class NumberParser extends Module {
           state := exp
         }
       }
-    }    
+    }
   }
-
 
   // Accumulator (signal `pn` in the figure): for every digit, shift the old
   // value one decimal place and add the new digit. So it reads it left to right.
-  val digit = char(3, 0) // '0'..'9' are 0x30..0x39, so the low nibble is the value
+  val digit =
+    char(3, 0) // '0'..'9' are 0x30..0x39, so the low nibble is the value
   val accNext = (accR << 3) +& (accR << 1) +& digit
   when(io.in.fire && isDigit) {
     accR := accNext
     when((accNext >> 64).orR) { overflowR := true.B }
   }
 
-
   // Which characters a number may contain at this point. Anything else means
   // the attribute is not a number.
-  val legal = MuxLookup(state, false.B)(Seq(
-    start -> (isColon || isWhitespace || isMinus || isDigit),
-    sign -> isDigit,
-    int -> (isDigit || isPoint || isExp || isWhitespace),
-    fract -> (isDigit || isExp || isWhitespace),
-    expSign -> (isDigit || isPlus || isMinus),
-    exp -> (isDigit || isWhitespace)
-  ))
+  val legal = MuxLookup(state, false.B)(
+    Seq(
+      start -> (isColon || isWhitespace || isMinus || isDigit),
+      sign -> isDigit,
+      int -> (isDigit || isPoint || isExp || isWhitespace),
+      fract -> (isDigit || isExp || isWhitespace),
+      expSign -> (isDigit || isPlus || isMinus),
+      exp -> (isDigit || isWhitespace)
+    )
+  )
   when(io.in.fire && !legal) { notANumberR := true.B }
 
   // Checks what attribute we are loading at every cycle and when the final byte have been taken.

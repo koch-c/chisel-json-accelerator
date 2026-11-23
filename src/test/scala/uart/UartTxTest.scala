@@ -52,7 +52,7 @@ class UartTxSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.in.bits.poke(0x96.U)
       c.io.in.valid.poke(true.B)
       // it is ready on the last cycle of the end bit
-      for (_ <- 0 until cyclesPerBit * 10 - 1) { 
+      for (_ <- 0 until cyclesPerBit * 10 - 1) {
         c.clock.step()
         c.io.in.ready.expect(false.B)
       }
