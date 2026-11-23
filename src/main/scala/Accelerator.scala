@@ -68,8 +68,9 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := loader.io.readEnable
-  buffer.io.readAddress := loader.io.readAddress
+  buffer.io.readEnable := loader.io.read.valid
+  buffer.io.readAddress := loader.io.read.bits
+  loader.io.read.ready := true.B
   loader.io.readData := buffer.io.readData
   loader.io.readValid := buffer.io.readValid
 

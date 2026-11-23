@@ -16,19 +16,22 @@ class AttributeByte extends Bundle {
 }
 
 /** Fetches one attribute at a time from a 512 x 64-bit InputBuffer. Byte offset
-  * 0 is bits 7:0. Memory responses arrive one cycle after requests. Descriptors
-  * must have a nonzero length and stay within the 4096-byte buffer. The caller
-  * must keep the selected memory contents unchanged until completion.
+  * 0 is bits 7:0. Memory responses arrive one cycle after the request is
+  * accepted. Descriptors must have a nonzero length and stay within the
+  * 4096-byte buffer. The caller must keep the selected memory contents
+  * unchanged until completion.
   */
 class AttributeLoader extends Module {
   val io = IO(new Bundle {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val out = Decoupled(new AttributeByte)
 
-    val readEnable = Output(Bool())
-    val readAddress = Output(UInt(9.W))
+    // Request for one 64-bit word. The memory port may be shared, so the
+    // request is held until it is accepted.
+    val read = Decoupled(UInt(9.W))
     val readData = Input(UInt(64.W))
-    val readValid = Input(Bool())
+    val readValid =
+      Input(Bool()) // the word requested last cycle is on readData
   })
 
   val idle :: request :: waitForWord :: emit :: Nil = Enum(4)
@@ -40,8 +43,8 @@ class AttributeLoader extends Module {
 
   io.descriptor.ready := state === idle
 
-  io.readEnable := state === request
-  io.readAddress := address(11, 3)
+  io.read.valid := state === request
+  io.read.bits := address(11, 3)
   io.out.valid := state === emit
   io.out.bits.data := (word >> (address(2, 0) << 3))(7, 0)
   io.out.bits.attributeId := attributeId
@@ -57,7 +60,9 @@ class AttributeLoader extends Module {
       }
     }
     is(request) {
-      state := waitForWord
+      when(io.read.fire) {
+        state := waitForWord
+      }
     }
     is(waitForWord) {
       when(io.readValid) {

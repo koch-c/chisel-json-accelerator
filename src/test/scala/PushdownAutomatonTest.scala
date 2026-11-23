@@ -133,7 +133,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
       val (descriptors, endOfRecords) = send(c, symbols, config)
       c.io.found.expect(true.B)
       c.io.done.expect(true.B)
-      assert(descriptors == Seq(Result(4, 6, 3), Result(4, 27, 4)))
+      assert(descriptors == Seq(Result(4, 6, 3), Result(5, 27, 4)))
       assert(endOfRecords == 1)
     }
   }

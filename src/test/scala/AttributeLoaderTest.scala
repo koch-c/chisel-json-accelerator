@@ -10,20 +10,22 @@ class AttributeLoaderHarness extends Module {
     val writeData = Input(UInt(64.W))
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val out = Decoupled(new AttributeByte)
-    val readEnable = Output(Bool())
+    val readGrant = Input(Bool()) // the loader may use the memory port
+    val readEnable = Output(Bool()) // the loader is requesting a word
   })
   val buffer = Module(new InputBuffer)
   val loader = Module(new AttributeLoader)
   buffer.io.writeEnable := io.writeEnable
   buffer.io.writeAddress := io.writeAddress
   buffer.io.writeData := io.writeData
-  buffer.io.readEnable := loader.io.readEnable
-  buffer.io.readAddress := loader.io.readAddress
+  buffer.io.readEnable := loader.io.read.fire
+  buffer.io.readAddress := loader.io.read.bits
+  loader.io.read.ready := io.readGrant
   loader.io.readData := buffer.io.readData
   loader.io.readValid := buffer.io.readValid
   loader.io.descriptor <> io.descriptor
   io.out <> loader.io.out
-  io.readEnable := loader.io.readEnable
+  io.readEnable := loader.io.read.valid
 }
 
 class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
@@ -36,6 +38,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
     c.io.descriptor.bits.startAddress.poke(0.U)
     c.io.descriptor.bits.length.poke(0.U)
     c.io.out.ready.poke(false.B)
+    c.io.readGrant.poke(true.B)
   }
 
   def writeWord(
@@ -149,6 +152,22 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       submit(c, 4094, 2, 3)
       collect(c, Seq(246, 247), 3)
       c.io.readEnable.expect(false.B)
+    }
+  }
+  it should "hold its read request until the memory port is granted" in {
+    test(new AttributeLoaderHarness) { c =>
+      initialize(c)
+      writeWord(c, 0, 0 until 8)
+      writeWord(c, 1, 8 until 16)
+      c.io.readGrant.poke(false.B)
+      submit(c, 6, 4, 9)
+      for (_ <- 0 until 5) {
+        c.io.readEnable.expect(true.B)
+        c.io.out.valid.expect(false.B)
+        c.clock.step()
+      }
+      c.io.readGrant.poke(true.B)
+      collect(c, Seq(6, 7, 8, 9), 9)
     }
   }
 
