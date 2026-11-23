@@ -101,7 +101,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   "Accelerator" should "extract numbers and reset between matching and missing records" in {
-    run(JsonPathConfig(Seq("temperature"))) { d =>
+    run(JsonPathConfig(Seq(Seq("temperature")))) { d =>
       d.record("{\"temperature\": 25,\"humidity\":60}\n", ": 25")
       d.record("{\"humidity\":60}\n", "")
       d.record("{\"temperature\":-1.25e+2  }\n", ":-1.25e+2  ")
@@ -109,7 +109,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "preserve string quotes, escapes and structural characters" in {
-    run(JsonPathConfig(Seq("name"))) { d =>
+    run(JsonPathConfig(Seq(Seq("name")))) { d =>
       d.record(
         "{\"name\" : \"a\\\"b,}:\\n\\u0041\" }\n",
         ": \"a\\\"b,}:\\n\\u0041\" "
@@ -118,7 +118,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "select nested paths rather than matching keys elsewhere" in {
-    run(JsonPathConfig(Seq("device", "location", "latitude"))) { d =>
+    run(JsonPathConfig(Seq(Seq("device", "location", "latitude")))) { d =>
       d.record(
         "{\"latitude\":0,\"device\":{\"location\":{\"latitude\": 12.34}}}\n",
         ": 12.34"
@@ -127,19 +127,19 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "concatenate repeated matches under output backpressure" in {
-    run(JsonPathConfig(Seq("v")), stall = true) { d =>
+    run(JsonPathConfig(Seq(Seq("v"))), stall = true) { d =>
       d.record("{\"v\":1,\"v\":\"two\",\"v\":3}\n", ":1:\"two\":3")
     }
   }
 
   it should "preserve values across memory word boundaries" in {
-    run(JsonPathConfig(Seq("text"))) { d =>
+    run(JsonPathConfig(Seq(Seq("text")))) { d =>
       d.record("{\"text\": \"0123456789ab\"}\n", ": \"0123456789ab\"")
     }
   }
 
   it should "extract before LF but wait for LF before completing the record" in {
-    run(JsonPathConfig(Seq("v"))) { d =>
+    run(JsonPathConfig(Seq(Seq("v")))) { d =>
       d.send("{\"v\": 1,") // Full word; extraction can start immediately.
       d.waitFor(d.output.length == 3)
       d.expect(": 1")
@@ -159,7 +159,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "wait for the consumer to accept output before asserting done" in {
-    run(JsonPathConfig(Seq("v"))) { d =>
+    run(JsonPathConfig(Seq(Seq("v")))) { d =>
       d.allowOutput = false
       d.send("{\"v\":1}\n")
       for (_ <- 0 until 80) d.tick()
@@ -174,7 +174,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "send a number as a binary frame and nothing for a missing key" in {
     run(
       JsonPathConfig(
-        Seq("temperature"),
+        Seq(Seq("temperature")),
         attributeId = 5,
         valueType = ValueType.Number
       )
@@ -194,7 +194,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "parse a number selected by a nested path" in {
     run(
       JsonPathConfig(
-        Seq("device", "location", "latitude"),
+        Seq(Seq("device", "location", "latitude")),
         valueType = ValueType.Number
       )
     ) { d =>
@@ -206,20 +206,22 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "send one frame per match under output backpressure" in {
-    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number), stall = true) {
-      d =>
-        d.recordBytes(
-          "{\"v\":1,\"v\":-2.5,\"v\":3e2}\n",
-          numberFrame(0, 1) ++
-            numberFrame(0, 25, negative = true, isFloat = true, exp10 = -1) ++
-            numberFrame(0, 3, isFloat = true, exp10 = 2)
-        )
-        d.recordBytes("{\"v\":7}\n", numberFrame(0, 7))
+    run(
+      JsonPathConfig(Seq(Seq("v")), valueType = ValueType.Number),
+      stall = true
+    ) { d =>
+      d.recordBytes(
+        "{\"v\":1,\"v\":-2.5,\"v\":3e2}\n",
+        numberFrame(0, 1) ++
+          numberFrame(0, 25, negative = true, isFloat = true, exp10 = -1) ++
+          numberFrame(0, 3, isFloat = true, exp10 = 2)
+      )
+      d.recordBytes("{\"v\":7}\n", numberFrame(0, 7))
     }
   }
 
   it should "flag a value that is not a number" in {
-    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number)) { d =>
+    run(JsonPathConfig(Seq(Seq("v")), valueType = ValueType.Number)) { d =>
       d.recordBytes("{\"v\": \"hot\"}\n", numberFrame(0, 0, notANumber = true))
       d.recordBytes("{\"v\":null}\n", numberFrame(0, 0, notANumber = true))
       d.recordBytes("{\"v\":21}\n", numberFrame(0, 21))
@@ -228,7 +230,11 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "send Int32 values in two's complement and flag the ones that do not fit" in {
     run(
-      JsonPathConfig(Seq("v"), attributeId = 2, valueType = ValueType.Int32)
+      JsonPathConfig(
+        Seq(Seq("v")),
+        attributeId = 2,
+        valueType = ValueType.Int32
+      )
     ) { d =>
       d.recordBytes(
         "{\"v\":25,\"v\":-7}\n",
@@ -241,13 +247,15 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "send Int64 values in two's complement" in {
-    run(JsonPathConfig(Seq("v"), valueType = ValueType.Int64), stall = true) {
-      d =>
-        d.recordBytes(
-          "{\"v\":-9223372036854775808,\"v\":4294967296}\n",
-          Seq(0, 1, 0, 0, 0, 0, 0, 0, 0, 0x80) ++ Seq(0, 0, 0, 0, 0, 0, 1, 0, 0,
-            0)
-        )
+    run(
+      JsonPathConfig(Seq(Seq("v")), valueType = ValueType.Int64),
+      stall = true
+    ) { d =>
+      d.recordBytes(
+        "{\"v\":-9223372036854775808,\"v\":4294967296}\n",
+        Seq(0, 1, 0, 0, 0, 0, 0, 0, 0, 0x80) ++ Seq(0, 0, 0, 0, 0, 0, 1, 0, 0,
+          0)
+      )
     }
   }
 
@@ -273,8 +281,8 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       sign + integer + fraction + exponent
     }
 
-    run(JsonPathConfig(Seq("v"), valueType = ValueType.Number)) { d =>
-      for (_ <- 0 until 10) {
+    run(JsonPathConfig(Seq(Seq("v")), valueType = ValueType.Number)) { d =>
+      for (_ <- 0 until 40) {
         val text = randomNumber()
         // Random padding moves the number to a different byte offset each time.
         val pad = "x" * random.nextInt(9)
