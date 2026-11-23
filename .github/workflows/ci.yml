@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+  pull_request:
 
 permissions:
   contents: read
@@ -24,5 +25,13 @@ jobs:
       - name: Set up SBT
         uses: sbt/setup-sbt@v1
 
+      - name: Check Scala formatting
+        run: sbt "scalafmtCheckAll; scalafmtSbtCheck"
+
       - name: Run tests
         run: sbt test
+
+      - name: Generate top-level Verilog
+        run: |
+          sbt "runMain GenerateAcceleratorTop"
+          test -s generated/AcceleratorTop.sv
