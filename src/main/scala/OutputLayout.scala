@@ -1,7 +1,8 @@
-/** Design-time description of the output record: the paper's attribute list
-  * and filter configuration (SPEAR-JSON Sec. IV). Pure Scala, no hardware.
+/** Design-time description of the output record: the paper's attribute list and
+  * filter configuration (SPEAR-JSON Sec. IV). Pure Scala, no hardware.
   */
 sealed trait AttributeType {
+
   /** Size of this attribute's field in the output record. */
   def bytes: Int
 }
@@ -37,18 +38,20 @@ final case class IntLit(value: BigInt) extends FilterValue
 final case class FloatLit(value: Double) extends FilterValue
 final case class StrLit(value: String) extends FilterValue
 
-/** One `attribute op constant` term of a record filter such as `$[?(id=42)]`. */
+/** One `attribute op constant` term of a record filter such as `$[?(id=42)]`.
+  */
 final case class Comparison(attributeId: Int, op: CompareOp, value: FilterValue)
 
-/** Attributes in JSONPath order; an attribute's id is its index in `attributes`.
-  * A record is kept only when every comparison in `filters` holds.
+/** Attributes in JSONPath order; an attribute's id is its index in
+  * `attributes`. A record is kept only when every comparison in `filters`
+  * holds.
   *
   * Frame on the wire: `presentBytes` of presence bitmask (bit `id % 8` of byte
   * `id / 8`), then every attribute's field at `offsets(id)`.
   */
 final case class OutputLayout(
-  attributes: Seq[AttributeType],
-  filters: Seq[Comparison] = Nil
+    attributes: Seq[AttributeType],
+    filters: Seq[Comparison] = Nil
 ) {
   require(attributes.nonEmpty, "an output layout needs at least one attribute")
   require(attributes.size <= 256, "attribute ids must fit in 8 bits")
@@ -60,21 +63,34 @@ final case class OutputLayout(
   val frameBytes: Int = presentBytes + recordBytes
 
   filters.foreach { filter =>
-    require(filter.attributeId >= 0 && filter.attributeId < attributes.size,
-      s"filter refers to attribute ${filter.attributeId}, but the layout has ${attributes.size}")
+    require(
+      filter.attributeId >= 0 && filter.attributeId < attributes.size,
+      s"filter refers to attribute ${filter.attributeId}, but the layout has ${attributes.size}"
+    )
     (attributes(filter.attributeId), filter.value) match {
       case (IntAttr(bits), IntLit(value)) =>
         val limit = BigInt(1) << (bits - 1)
-        require(value >= -limit && value < limit, s"filter constant $value does not fit int($bits)")
+        require(
+          value >= -limit && value < limit,
+          s"filter constant $value does not fit int($bits)"
+        )
       case (FloatAttr(_), FloatLit(value)) =>
         require(!value.isNaN, "a filter cannot compare against NaN")
-      case (FloatAttr(_), IntLit(_)) => // Compared as a float.
+      case (FloatAttr(_), IntLit(_))          => // Compared as a float.
       case (StringAttr(bytes), StrLit(value)) =>
-        require(filter.op == CompareOp.Eq, "strings only support the = comparison")
-        require(value.getBytes("UTF-8").length <= bytes,
-          s"filter constant \"$value\" is longer than string($bytes)")
+        require(
+          filter.op == CompareOp.Eq,
+          "strings only support the = comparison"
+        )
+        require(
+          value.getBytes("UTF-8").length <= bytes,
+          s"filter constant \"$value\" is longer than string($bytes)"
+        )
       case (attribute, value) =>
-        require(false, s"filter constant $value cannot be compared with $attribute")
+        require(
+          false,
+          s"filter constant $value cannot be compared with $attribute"
+        )
     }
   }
 }

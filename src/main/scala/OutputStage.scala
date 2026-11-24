@@ -2,8 +2,10 @@ import chisel3._
 import chisel3.util._
 
 object OutputStage {
+
   /** Smallest power of two that holds one whole frame. */
-  def defaultFifoDepth(layout: OutputLayout): Int = 1 << log2Ceil(layout.frameBytes)
+  def defaultFifoDepth(layout: OutputLayout): Int =
+    1 << log2Ceil(layout.frameBytes)
 }
 
 /** Output stage (SPEAR-JSON Fig. 2, block 5).
@@ -18,7 +20,8 @@ object OutputStage {
   * live outside any per-record reset.
   */
 class OutputStage(layout: OutputLayout, outFifoDepth: Int) extends Module {
-  def this(layout: OutputLayout) = this(layout, OutputStage.defaultFifoDepth(layout))
+  def this(layout: OutputLayout) =
+    this(layout, OutputStage.defaultFifoDepth(layout))
   require(outFifoDepth > 0, "the out FIFO must hold at least one byte")
 
   private val attributes = layout.attributes
@@ -42,12 +45,20 @@ class OutputStage(layout: OutputLayout, outFifoDepth: Int) extends Module {
   val idle :: takeString :: takeInt :: takeFloat :: commit :: Nil = Enum(5)
   val state = RegInit(idle)
   val current = Reg(UInt(8.W)) // Attribute being filled.
-  private val maxStringBytes = attributes.collect { case StringAttr(bytes) => bytes }.maxOption.getOrElse(1)
-  val written = Reg(UInt(log2Ceil(maxStringBytes + 1).W)) // Saturates at maxStringBytes.
+  private val maxStringBytes = attributes
+    .collect { case StringAttr(bytes) => bytes }
+    .maxOption
+    .getOrElse(1)
+  val written = Reg(
+    UInt(log2Ceil(maxStringBytes + 1).W)
+  ) // Saturates at maxStringBytes.
 
   private def entryHasType(matches: AttributeType => Boolean): Bool =
     attributes.zipWithIndex
-      .collect { case (attribute, id) if matches(attribute) => io.reorder.bits.attributeId === id.U }
+      .collect {
+        case (attribute, id) if matches(attribute) =>
+          io.reorder.bits.attributeId === id.U
+      }
       .foldLeft(false.B)(_ || _)
 
   io.reorder.ready := state === idle
@@ -86,8 +97,10 @@ class OutputStage(layout: OutputLayout, outFifoDepth: Int) extends Module {
     attribute match {
       case StringAttr(bytes) =>
         // A duplicate key replaces the earlier value, so start from zeros.
-        when(io.reorder.fire && !io.reorder.bits.endOfRecord &&
-          io.reorder.bits.attributeId === id.U) {
+        when(
+          io.reorder.fire && !io.reorder.bits.endOfRecord &&
+            io.reorder.bits.attributeId === id.U
+        ) {
           slice.foreach(_ := 0.U)
           present(id) := false.B
           truncated(id) := false.B
@@ -116,7 +129,8 @@ class OutputStage(layout: OutputLayout, outFifoDepth: Int) extends Module {
         when(io.ints.fire && selected) {
           val value = io.ints.bits.value.asUInt
           // The value fits int(32) when bits 63..31 all equal the sign.
-          val fits = if (bits == 64) true.B else value(63, 31).andR || !value(63, 31).orR
+          val fits =
+            if (bits == 64) true.B else value(63, 31).andR || !value(63, 31).orR
           val ok = io.ints.bits.ok && fits
           slice.zipWithIndex.foreach { case (byte, i) =>
             byte := Mux(ok, value(8 * i + 7, 8 * i), 0.U)

@@ -177,7 +177,15 @@ class OutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new ExecutionHarness(layout)) { c =>
       // Document order, plus id 9, which is not in the layout.
       val attributes =
-        Seq(0 -> "id", 1 -> "n", 2 -> "x", 3 -> "big", 9 -> "frac", 4 -> "frac", 5 -> "word")
+        Seq(
+          0 -> "id",
+          1 -> "n",
+          2 -> "x",
+          3 -> "big",
+          9 -> "frac",
+          4 -> "frac",
+          5 -> "word"
+        )
       val (output, dropped) = playRecord(c, json, attributes)
       val expected = Seq(0x03) ++ le(42, 4) ++ le(BigInt(-7), 8) ++
         Seq.fill(4 + 4 + 8 + 8)(0)
@@ -192,9 +200,11 @@ class OutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
       Seq(Comparison(0, CompareOp.Eq, IntLit(42)))
     )
     test(new ExecutionHarness(layout)) { c =>
-      val (kept, _) = playRecord(c, """{"b":-1,"a":42}""", Seq(1 -> "b", 0 -> "a"))
+      val (kept, _) =
+        playRecord(c, """{"b":-1,"a":42}""", Seq(1 -> "b", 0 -> "a"))
       assert(kept == Seq(0x03) ++ le(42, 4) ++ le(BigInt(-1), 4))
-      val (gone, dropped) = playRecord(c, """{"b":-1,"a":41}""", Seq(1 -> "b", 0 -> "a"))
+      val (gone, dropped) =
+        playRecord(c, """{"b":-1,"a":41}""", Seq(1 -> "b", 0 -> "a"))
       assert(gone.isEmpty && dropped == 1)
       val (missing, droppedAgain) = playRecord(c, """{"b":5}""", Seq(1 -> "b"))
       assert(missing.isEmpty && droppedAgain == 1)
@@ -268,7 +278,11 @@ class OutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
         (if (e) -1 else d, l, if (l) ok else true)
       }
       val expected = "joh".map(ch => (ch.toInt, false, true)) ++
-        Seq(('n'.toInt, true, true), (-1, true, true), ('a'.toInt, true, false)) ++
+        Seq(
+          ('n'.toInt, true, true),
+          (-1, true, true),
+          ('a'.toInt, true, false)
+        ) ++
         Seq(('x'.toInt, false, true), ('y'.toInt, true, false))
       assert(seen.toSeq == expected.toSeq, s"Unexpected beats: $seen")
     }

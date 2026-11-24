@@ -4,8 +4,8 @@ import chisel3.util._
 /** Record filter of the output stage (SPEAR-JSON Sec. III-D): one comparator
   * per Comparison, all ANDed. A comparison on an absent attribute is false.
   *
-  * Numbers are compared through an unsigned key that preserves their order,
-  * so ints and floats share one comparator shape.
+  * Numbers are compared through an unsigned key that preserves their order, so
+  * ints and floats share one comparator shape.
   */
 object SelectionLogic {
   def keep(
@@ -19,7 +19,8 @@ object SelectionLogic {
       val attribute = layout.attributes(id)
       val offset = layout.offsets(id)
       // Byte 0 of a field is its least significant byte.
-      val raw = Cat((0 until attribute.bytes).reverse.map(i => fields(offset + i)))
+      val raw =
+        Cat((0 until attribute.bytes).reverse.map(i => fields(offset + i)))
       val matches = (attribute, filter.value) match {
         case (IntAttr(bits), IntLit(value)) =>
           compare(filter.op, intKey(raw, bits), intKey(value, bits).U(bits.W))
@@ -31,27 +32,31 @@ object SelectionLogic {
           // A truncated string only shares a prefix with the constant.
           raw === stringConstant(value).U((8 * bytes).W) && !truncated(id)
         case (other, value) =>
-          throw new IllegalArgumentException(s"$value cannot be compared with $other")
+          throw new IllegalArgumentException(
+            s"$value cannot be compared with $other"
+          )
       }
       present(id) && matches
     }
     terms.foldLeft(true.B)(_ && _)
   }
 
-  private def compare(op: CompareOp, key: UInt, constant: UInt): Bool = op match {
-    case CompareOp.Eq => key === constant
-    case CompareOp.Lt => key < constant
-    case CompareOp.Gt => key > constant
-    case CompareOp.Le => key <= constant
-    case CompareOp.Ge => key >= constant
-  }
+  private def compare(op: CompareOp, key: UInt, constant: UInt): Bool =
+    op match {
+      case CompareOp.Eq => key === constant
+      case CompareOp.Lt => key < constant
+      case CompareOp.Gt => key > constant
+      case CompareOp.Le => key <= constant
+      case CompareOp.Ge => key >= constant
+    }
 
   private def signBit(bits: Int): BigInt = BigInt(1) << (bits - 1)
   private def mask(bits: Int): BigInt = (BigInt(1) << bits) - 1
 
   // Two's complement order becomes unsigned order when the sign bit is flipped.
   private def intKey(raw: UInt, bits: Int): UInt = raw ^ signBit(bits).U(bits.W)
-  private def intKey(value: BigInt, bits: Int): BigInt = (value & mask(bits)) ^ signBit(bits)
+  private def intKey(value: BigInt, bits: Int): BigInt =
+    (value & mask(bits)) ^ signBit(bits)
 
   // IEEE-754 is sign-magnitude: set the sign bit of non-negative values and
   // invert negative ones. -0 is treated as +0.
@@ -64,16 +69,30 @@ object SelectionLogic {
     if (negative) ~raw & mask(bits) else raw | signBit(bits)
   }
 
-  private def compareFloat(op: CompareOp, raw: UInt, bits: Int, constant: Double): Bool = {
+  private def compareFloat(
+      op: CompareOp,
+      raw: UInt,
+      bits: Int,
+      constant: Double
+  ): Bool = {
     val mantissaBits = if (bits == 32) 23 else 52
     val constantBits =
-      if (bits == 32) BigInt(java.lang.Float.floatToIntBits(constant.toFloat)) & mask(32)
+      if (bits == 32)
+        BigInt(java.lang.Float.floatToIntBits(constant.toFloat)) & mask(32)
       else BigInt(java.lang.Double.doubleToLongBits(constant)) & mask(64)
     // NaN compares false with everything.
     val isNaN = raw(bits - 2, mantissaBits).andR && raw(mantissaBits - 1, 0).orR
-    compare(op, floatKey(raw, bits), floatKey(constantBits, bits).U(bits.W)) && !isNaN
+    compare(
+      op,
+      floatKey(raw, bits),
+      floatKey(constantBits, bits).U(bits.W)
+    ) && !isNaN
   }
 
   private def stringConstant(value: String): BigInt =
-    value.getBytes("UTF-8").zipWithIndex.map { case (byte, i) => BigInt(byte & 0xff) << (8 * i) }.sum
+    value
+      .getBytes("UTF-8")
+      .zipWithIndex
+      .map { case (byte, i) => BigInt(byte & 0xff) << (8 * i) }
+      .sum
 }

@@ -2,7 +2,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 class OutputLayoutSpec extends AnyFlatSpec {
   "OutputLayout" should "place attributes at running offsets in JSONPath order" in {
-    val layout = OutputLayout(Seq(IntAttr(64), StringAttr(32), IntAttr(32), FloatAttr(32)))
+    val layout =
+      OutputLayout(Seq(IntAttr(64), StringAttr(32), IntAttr(32), FloatAttr(32)))
     assert(layout.offsets == Seq(0, 8, 40, 44))
     assert(layout.recordBytes == 48)
     assert(layout.presentBytes == 1)
@@ -38,15 +39,23 @@ class OutputLayoutSpec extends AnyFlatSpec {
   it should "reject filters that cannot be built" in {
     val attributes = Seq(IntAttr(32), FloatAttr(32), StringAttr(4))
     def filter(comparison: Comparison): Unit = {
-      intercept[IllegalArgumentException] { OutputLayout(attributes, Seq(comparison)) }
+      intercept[IllegalArgumentException] {
+        OutputLayout(attributes, Seq(comparison))
+      }
     }
     filter(Comparison(3, CompareOp.Eq, IntLit(1))) // No such attribute.
-    filter(Comparison(0, CompareOp.Eq, IntLit(BigInt(1) << 31))) // Does not fit int(32).
+    filter(
+      Comparison(0, CompareOp.Eq, IntLit(BigInt(1) << 31))
+    ) // Does not fit int(32).
     filter(Comparison(0, CompareOp.Eq, StrLit("1")))
     filter(Comparison(0, CompareOp.Eq, FloatLit(1.0)))
     filter(Comparison(1, CompareOp.Eq, FloatLit(Double.NaN)))
     filter(Comparison(2, CompareOp.Eq, IntLit(1)))
-    filter(Comparison(2, CompareOp.Lt, StrLit("john"))) // Strings only support =.
-    filter(Comparison(2, CompareOp.Eq, StrLit("johnny"))) // Longer than string(4).
+    filter(
+      Comparison(2, CompareOp.Lt, StrLit("john"))
+    ) // Strings only support =.
+    filter(
+      Comparison(2, CompareOp.Eq, StrLit("johnny"))
+    ) // Longer than string(4).
   }
 }

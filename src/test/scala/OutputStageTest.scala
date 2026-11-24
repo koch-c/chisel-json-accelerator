@@ -8,7 +8,8 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   private case class Beat(data: Int, empty: Boolean, last: Boolean, ok: Boolean)
   private case class Scalar(value: BigInt, ok: Boolean)
 
-  /** Plays the reorder FIFO and the three value FIFOs, and collects the frames. */
+  /** Plays the reorder FIFO and the three value FIFOs, and collects the frames.
+    */
   private class Driver(c: OutputStage) {
     val reorder = mutable.Queue.empty[Entry]
     val strings = mutable.Queue.empty[Beat]
@@ -34,7 +35,8 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
     }
     def int(value: BigInt, ok: Boolean = true): Unit = ints += Scalar(value, ok)
-    def float(bits: BigInt, ok: Boolean = true): Unit = floats += Scalar(bits, ok)
+    def float(bits: BigInt, ok: Boolean = true): Unit =
+      floats += Scalar(bits, ok)
 
     def tick(): Unit = {
       val entry = if (holdReorder) None else reorder.headOption
@@ -77,10 +79,14 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
         heldByte = if (ready) None else Some(byte)
       } else heldByte = None
 
-      if (entry.nonEmpty && c.io.reorder.ready.peek().litToBoolean) reorder.dequeue()
-      if (beat.nonEmpty && c.io.strings.ready.peek().litToBoolean) strings.dequeue()
-      if (integer.nonEmpty && c.io.ints.ready.peek().litToBoolean) ints.dequeue()
-      if (real.nonEmpty && c.io.floats.ready.peek().litToBoolean) floats.dequeue()
+      if (entry.nonEmpty && c.io.reorder.ready.peek().litToBoolean)
+        reorder.dequeue()
+      if (beat.nonEmpty && c.io.strings.ready.peek().litToBoolean)
+        strings.dequeue()
+      if (integer.nonEmpty && c.io.ints.ready.peek().litToBoolean)
+        ints.dequeue()
+      if (real.nonEmpty && c.io.floats.ready.peek().litToBoolean)
+        floats.dequeue()
       if (c.io.recordDone.peek().litToBoolean) done += 1
       if (c.io.recordDropped.peek().litToBoolean) dropped += 1
       c.clock.step()
@@ -131,12 +137,19 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   // $.(id::int(32) | user.name::string(8))
   private val idName = OutputLayout(Seq(IntAttr(32), StringAttr(8)))
 
-  private def sendIdName(d: Driver, id: Option[BigInt], name: Option[String]): Unit = {
+  private def sendIdName(
+      d: Driver,
+      id: Option[BigInt],
+      name: Option[String]
+  ): Unit = {
     id.foreach { value => d.attribute(0); d.int(value) }
     name.foreach { value => d.attribute(1); d.string(value) }
     d.endOfRecord()
   }
-  private def idNameFrame(id: Option[BigInt], name: Option[String]): Seq[Int] = {
+  private def idNameFrame(
+      id: Option[BigInt],
+      name: Option[String]
+  ): Seq[Int] = {
     val mask = (if (id.nonEmpty) 1 else 0) | (if (name.nonEmpty) 2 else 0)
     Seq(mask) ++ le(id.getOrElse(BigInt(0)), 4) ++ text(name.getOrElse(""), 8)
   }
@@ -159,7 +172,9 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   "OutputStage" should "serialize a record as presence mask plus fixed-offset fields" in {
     run(idName) { d =>
       sendIdName(d, Some(7), Some("john"))
-      d.expectFrames(Seq(0x03, 0x07, 0, 0, 0, 0x6a, 0x6f, 0x68, 0x6e, 0, 0, 0, 0))
+      d.expectFrames(
+        Seq(0x03, 0x07, 0, 0, 0, 0x6a, 0x6f, 0x68, 0x6e, 0, 0, 0, 0)
+      )
       assert(d.done == 1)
       assert(d.dropped == 0)
     }
@@ -301,12 +316,17 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       // record 3 waits in the attribute registers for the buffer to free up.
       assert(d.done == 2)
       assert(d.output.isEmpty)
-      assert(d.reorder.size == 3, "Record 4 was accepted before record 3 committed")
+      assert(
+        d.reorder.size == 3,
+        "Record 4 was accepted before record 3 committed"
+      )
 
       d.allowOutput = true
       d.stall = true
       d.waitFor(d.done == 4)
-      d.expectFrames((1 to 4).map(i => idNameFrame(Some(i), Some(s"rec$i"))): _*)
+      d.expectFrames(
+        (1 to 4).map(i => idNameFrame(Some(i), Some(s"rec$i"))): _*
+      )
     }
   }
 
@@ -319,13 +339,17 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "drop records whose int does not satisfy every comparison" in {
-    val layout = idName.copy(filters = Seq(
-      Comparison(0, CompareOp.Ge, IntLit(-5)),
-      Comparison(0, CompareOp.Lt, IntLit(20))
-    ))
+    val layout = idName.copy(filters =
+      Seq(
+        Comparison(0, CompareOp.Ge, IntLit(-5)),
+        Comparison(0, CompareOp.Lt, IntLit(20))
+      )
+    )
     run(layout) { d =>
       for (id <- Seq(-5, -4, 0, 19)) {
-        expectKept(d)(sendIdName(d, Some(id), Some("x")))(idNameFrame(Some(id), Some("x")))
+        expectKept(d)(sendIdName(d, Some(id), Some("x")))(
+          idNameFrame(Some(id), Some("x"))
+        )
       }
       for (id <- Seq(-6, 20, 21, Int.MinValue, Int.MaxValue)) {
         expectDropped(d)(sendIdName(d, Some(id), Some("x")))
@@ -348,17 +372,30 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
       kept
     }
-    assert(Seq(41, 42, 43).map(outcome(CompareOp.Eq, _)) == Seq(false, true, false))
-    assert(Seq(41, 42, 43).map(outcome(CompareOp.Lt, _)) == Seq(true, false, false))
-    assert(Seq(41, 42, 43).map(outcome(CompareOp.Gt, _)) == Seq(false, false, true))
-    assert(Seq(41, 42, 43).map(outcome(CompareOp.Le, _)) == Seq(true, true, false))
-    assert(Seq(41, 42, 43).map(outcome(CompareOp.Ge, _)) == Seq(false, true, true))
+    assert(
+      Seq(41, 42, 43).map(outcome(CompareOp.Eq, _)) == Seq(false, true, false)
+    )
+    assert(
+      Seq(41, 42, 43).map(outcome(CompareOp.Lt, _)) == Seq(true, false, false)
+    )
+    assert(
+      Seq(41, 42, 43).map(outcome(CompareOp.Gt, _)) == Seq(false, false, true)
+    )
+    assert(
+      Seq(41, 42, 43).map(outcome(CompareOp.Le, _)) == Seq(true, true, false)
+    )
+    assert(
+      Seq(41, 42, 43).map(outcome(CompareOp.Ge, _)) == Seq(false, true, true)
+    )
   }
 
   it should "compare strings exactly, including truncated ones" in {
     val layout = OutputLayout(
       Seq(StringAttr(4), StringAttr(8)),
-      Seq(Comparison(0, CompareOp.Eq, StrLit("john")), Comparison(1, CompareOp.Eq, StrLit("al")))
+      Seq(
+        Comparison(0, CompareOp.Eq, StrLit("john")),
+        Comparison(1, CompareOp.Eq, StrLit("al"))
+      )
     )
     def send(d: Driver, first: String, second: String): Unit = {
       d.attribute(0)
@@ -368,19 +405,28 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.endOfRecord()
     }
     run(layout) { d =>
-      expectKept(d)(send(d, "john", "al"))(Seq(0x03) ++ text("john", 4) ++ text("al", 8))
-      expectDropped(d)(send(d, "johnny", "al")) // Only the first four bytes match.
+      expectKept(d)(send(d, "john", "al"))(
+        Seq(0x03) ++ text("john", 4) ++ text("al", 8)
+      )
+      expectDropped(d)(
+        send(d, "johnny", "al")
+      ) // Only the first four bytes match.
       expectDropped(d)(send(d, "joh", "al"))
       expectDropped(d)(send(d, "john", "ale"))
       expectDropped(d)(send(d, "john", ""))
-      expectKept(d)(send(d, "john", "al"))(Seq(0x03) ++ text("john", 4) ++ text("al", 8))
+      expectKept(d)(send(d, "john", "al"))(
+        Seq(0x03) ++ text("john", 4) ++ text("al", 8)
+      )
     }
   }
 
   it should "compare floats by value, not by bit pattern" in {
     val range = OutputLayout(
       Seq(FloatAttr(32)),
-      Seq(Comparison(0, CompareOp.Ge, FloatLit(-0.65)), Comparison(0, CompareOp.Le, IntLit(38)))
+      Seq(
+        Comparison(0, CompareOp.Ge, FloatLit(-0.65)),
+        Comparison(0, CompareOp.Le, IntLit(38))
+      )
     )
     def send(d: Driver, bits: BigInt): Unit = {
       d.attribute(0)
@@ -391,8 +437,16 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       for (value <- Seq(-0.65f, -0.5f, -0.0f, 0.0f, 1.0e-40f, 37.99f, 38.0f)) {
         expectKept(d)(send(d, f32(value)))(Seq(0x01) ++ le(f32(value), 4))
       }
-      for (value <- Seq(-0.66f, -1.0e30f, 38.01f, Float.PositiveInfinity,
-          Float.NegativeInfinity, Float.NaN)) {
+      for (
+        value <- Seq(
+          -0.66f,
+          -1.0e30f,
+          38.01f,
+          Float.PositiveInfinity,
+          Float.NegativeInfinity,
+          Float.NaN
+        )
+      ) {
         expectDropped(d)(send(d, f32(value)))
       }
     }
