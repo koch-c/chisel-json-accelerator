@@ -111,6 +111,8 @@ jobs:
           test -s generated/AcceleratorTop.sv
 ```
 
+To make it easier for us to have consistent code formatting, we also created a Git pre-commit hook, that runs `sbt scalafmtOnly` on the files that are being committed. Because git does not auto enable pre-commit hooks, one must enable it manually after clone using: `git config --local core.hooksPath .githooks`.
+
 ### Initial Design Process
 
 We adopted the mindset, **build, deploy, repeat** and in the beginning of the project we pushed for an MVP. Our first MVP was very simple. It essentially streamed a simple JSON string stored on chip, and lid an LED depending on whether or not the JSON contained the key matching a basic `JSONPath` query. It accepted JSON strings like
