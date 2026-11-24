@@ -17,13 +17,16 @@ class ReorderEntry extends Bundle {
   val endOfRecord = Bool()
 }
 
-/** One byte of a string value: quotes stripped, escapes left raw.
-  * A zero-length string is a single beat with empty and last set.
+/** One byte of a string value, quotes stripped (StringParser also decodes the
+  * escapes). A zero-length string is a single beat with empty and last set.
+  * ok is only read on the last beat: false means the value is not a usable
+  * string, and the attribute is then absent, like a number that fails to parse.
   */
 class StringBeat extends Bundle {
   val data = UInt(8.W)
   val empty = Bool() // This beat carries no byte.
   val last = Bool()
+  val ok = Bool()
 }
 
 class IntValue extends Bundle {

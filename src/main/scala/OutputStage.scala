@@ -102,7 +102,14 @@ class OutputStage(layout: OutputLayout, outFifoDepth: Int) extends Module {
               truncated(id) := true.B
             }
           }
-          when(io.strings.bits.last) { present(id) := true.B }
+          when(io.strings.bits.last) {
+            present(id) := io.strings.bits.ok
+            // An unusable string is absent with a zero field, like a number.
+            when(!io.strings.bits.ok) {
+              slice.foreach(_ := 0.U)
+              truncated(id) := false.B
+            }
+          }
         }
 
       case IntAttr(bits) =>

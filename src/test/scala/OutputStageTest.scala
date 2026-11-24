@@ -5,7 +5,7 @@ import scala.collection.mutable
 
 class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   private case class Entry(id: Int, endOfRecord: Boolean)
-  private case class Beat(data: Int, empty: Boolean, last: Boolean)
+  private case class Beat(data: Int, empty: Boolean, last: Boolean, ok: Boolean)
   private case class Scalar(value: BigInt, ok: Boolean)
 
   /** Plays the reorder FIFO and the three value FIFOs, and collects the frames. */
@@ -26,11 +26,11 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
 
     def attribute(id: Int): Unit = reorder += Entry(id, endOfRecord = false)
     def endOfRecord(): Unit = reorder += Entry(0, endOfRecord = true)
-    def string(text: String): Unit = {
+    def string(text: String, ok: Boolean = true): Unit = {
       val bytes = text.getBytes("UTF-8").map(_ & 0xff)
-      if (bytes.isEmpty) strings += Beat(0, empty = true, last = true)
+      if (bytes.isEmpty) strings += Beat(0, empty = true, last = true, ok)
       for ((byte, i) <- bytes.zipWithIndex) {
-        strings += Beat(byte, empty = false, last = i == bytes.length - 1)
+        strings += Beat(byte, empty = false, last = i == bytes.length - 1, ok)
       }
     }
     def int(value: BigInt, ok: Boolean = true): Unit = ints += Scalar(value, ok)
@@ -49,6 +49,7 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.io.strings.bits.data.poke(b.data.U)
         c.io.strings.bits.empty.poke(b.empty.B)
         c.io.strings.bits.last.poke(b.last.B)
+        c.io.strings.bits.ok.poke(b.ok.B)
       }
       val integer = if (holdValues) None else ints.headOption
       c.io.ints.valid.poke(integer.nonEmpty.B)
@@ -214,6 +215,21 @@ class OutputStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.int(2)
       d.endOfRecord()
       d.expectFrames(idNameFrame(Some(2), Some("al")))
+    }
+  }
+
+  it should "treat a string that is not ok as absent with a zero field" in {
+    run(idName) { d =>
+      d.attribute(0)
+      d.int(7)
+      d.attribute(1)
+      d.string("john", ok = false)
+      d.endOfRecord()
+      d.expectFrames(idNameFrame(Some(7), None))
+      d.attribute(1)
+      d.string("0123456789", ok = false) // Also clears the truncated flag.
+      d.endOfRecord()
+      d.expectFrames(idNameFrame(None, None))
     }
   }
 
