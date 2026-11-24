@@ -3,10 +3,11 @@ import chisel3.util._
 
 /** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
   * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * depends on config.valueType: the exact AttributeLoader bytes without added
-  * framing (Raw), a NumberSerializer frame, or a StringParser frame. done
-  * pulses for one cycle after LF, parsing, and all output transfers finish. It
-  * denotes byte acceptance by the consumer, not physical UART completion.
+  * depends on the value type of the matched path: the exact AttributeLoader
+  * bytes without added framing (Raw), a NumberSerializer frame, or a
+  * StringParser frame. Values are sent in document order. done pulses for one
+  * cycle after LF, parsing, and all output transfers finish. It denotes byte
+  * acceptance by the consumer, not physical UART completion.
   */
 class Accelerator(
     config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))
@@ -39,7 +40,7 @@ class Accelerator(
     )
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
-  val lane = withReset(recordReset) { Module(new ParserLane(config.valueType)) }
+  val bank = withReset(recordReset) { Module(new ParserBank(config)) }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -68,43 +69,27 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := lane.io.read.valid
-  buffer.io.readAddress := lane.io.read.bits
-  lane.io.read.ready := true.B
-  lane.io.readData := buffer.io.readData
-  lane.io.readValid := buffer.io.readValid
+  buffer.io.readEnable := bank.io.readEnable
+  buffer.io.readAddress := bank.io.readAddress
+  bank.io.readData := buffer.io.readData
+  bank.io.readValid := buffer.io.readValid
 
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
-  lane.io.descriptor <> pda.io.descriptor
+  bank.io.descriptor <> pda.io.descriptor
 
-  // The lane loads the value and sends it raw, as a number or as a string.
-  io.out <> lane.io.out
-  val lastOut = lane.io.last
+  // The bank loads each value and sends it raw, as a number or as a string,
+  // depending on the value type of its path.
+  io.out <> bank.io.out
 
   val endSeen = RegInit(false.B)
-
-  // Attributes that have been handed to the loader but whose output has not
-  // been fully accepted yet. At most three: one each in the loader, the number
-  // parser and the serializer (the string path has only the loader and the
-  // string parser).
-  val pendingAttributes = RegInit(0.U(2.W))
-  val attributeStarted = lane.io.descriptor.fire
-  val attributeFinished = io.out.fire && lastOut
-  val attributeBusy = pendingAttributes =/= 0.U
-
   when(pda.io.endOfRecord) { endSeen := true.B }
-  when(attributeStarted && !attributeFinished) {
-    pendingAttributes := pendingAttributes + 1.U
-  }
-  when(attributeFinished && !attributeStarted) {
-    pendingAttributes := pendingAttributes - 1.U
-  }
 
-  // A closing brace may be parsed before LF arrives. Output backpressure holds
-  // attributeBusy until the final byte is actually accepted by the consumer.
+  // A closing brace may be parsed before LF arrives. The bank is busy from the
+  // moment it accepts a descriptor until the final byte of that attribute is
+  // actually accepted by the consumer, so output backpressure delays the reset.
   clearRecord := false.B
-  when(!clearRecord && lineStored && endSeen && !attributeBusy) {
+  when(!clearRecord && lineStored && endSeen && !bank.io.busy) {
     clearRecord := true.B
   }
   when(clearRecord) {
@@ -112,6 +97,5 @@ class Accelerator(
     wordCount := 0.U
     lineStored := false.B
     endSeen := false.B
-    pendingAttributes := 0.U
   }
 }

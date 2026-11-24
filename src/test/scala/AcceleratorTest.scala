@@ -327,6 +327,81 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "give each path its own value type and attribute id" in {
+    val config = JsonPathConfig(
+      Seq(Seq("id"), Seq("user", "name")),
+      attributeId = 4,
+      valueTypes = Seq(ValueType.Int32, ValueType.String)
+    )
+    run(config) { d =>
+      d.recordBytes(
+        "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
+        Seq(4, 0, 7, 0, 0, 0) ++ stringFrame(5, "bob")
+      )
+      // Document order, not config order.
+      d.recordBytes(
+        "{\"user\":{\"name\":\"Ada\"},\"id\":-2}\n",
+        stringFrame(5, "Ada") ++ Seq(4, 1, 0xfe, 0xff, 0xff, 0xff)
+      )
+      d.recordBytes("{\"other\":1}\n", Seq.empty)
+    }
+  }
+
+  it should "keep document order with several parsers per type" in {
+    val config = JsonPathConfig(
+      Seq(Seq("v")),
+      valueType = ValueType.String,
+      parsersPerType = 2
+    )
+    val long = "a first value that takes much longer to send than the next"
+    run(config, stall = true) { d =>
+      d.recordBytes(
+        "{\"v\":\"" + long + "\",\"v\":\"b\",\"v\":3,\"v\":\"d\"}\n",
+        stringFrame(0, long) ++ stringFrame(0, "b") ++
+          stringFrame(0, "", flags = 1) ++ stringFrame(0, "d")
+      )
+      d.recordBytes("{\"v\":\"again\"}\n", stringFrame(0, "again"))
+    }
+  }
+
+  it should "give the same output with one parser per type and with three" in {
+    val random = new scala.util.Random(11)
+    def value(): String =
+      if (random.nextBoolean()) (random.nextInt(200000) - 100000).toString
+      else
+        "\"" + Seq
+          .fill(random.nextInt(12))("abc xyz,}:".charAt(random.nextInt(10)))
+          .mkString + "\""
+    // Records with several matches close together, where the lanes overlap.
+    val records = Seq.fill(12) {
+      val fields = Seq.fill(1 + random.nextInt(5)) {
+        val key = Seq("n", "s", "skip")(random.nextInt(3))
+        "\"" + key + "\":" + " " * random.nextInt(3) + value()
+      }
+      "{" + fields.mkString(",") + "}\n"
+    }
+    def outputWith(parsers: Int): Seq[Int] = {
+      var result = Seq.empty[Int]
+      val config = JsonPathConfig(
+        Seq(Seq("n"), Seq("s")),
+        valueTypes = Seq(ValueType.Number, ValueType.String),
+        parsersPerType = parsers
+      )
+      run(config, stall = parsers > 1) { d =>
+        for (record <- records) {
+          val previous = d.completions
+          d.send(record)
+          d.waitFor(d.completions > previous)
+        }
+        result = d.output.toSeq
+      }
+      result
+    }
+    val reference = outputWith(1)
+    assert(reference.nonEmpty)
+    assert(outputWith(3) == reference)
+  }
+
   it should "match a software reference for random numbers" in {
     val random = new scala.util.Random(2026)
     def digits(count: Int): String =
