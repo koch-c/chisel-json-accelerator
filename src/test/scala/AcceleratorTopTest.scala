@@ -2,7 +2,8 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** UART smoke tests for raw and numeric output; detailed extraction tests use Accelerator directly.
+/** UART smoke tests for raw and numeric output; detailed extraction tests use
+  * Accelerator directly.
   */
 class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
 

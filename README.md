@@ -56,6 +56,27 @@ flowchart LR
 - `UartTx` sends the extracted value bytes back to our computer over UART, completing the flow.
 <!-- TODO: Document the NumberParser and NumberSerializer output path. -->
 
+### Parameterization
+The hardware generator takes a `JsonPathConfig` with these parameters:
+
+| Parameter | Explanation |
+|---|---|
+| `paths` | The `JSONPath` query the generated hardware matches. |
+| `maxDepth` | Maximum JSON nesting the matcher tracks, including the root (default: 8). |
+| `attributeId` | **WTF is this. We should remove this.** First byte of every numeric frame; shared by all paths. Not sent in `Raw` mode. |
+| `valueType` | One output format for all paths: `Raw`, `Number`, `Int32`, or `Int64`. |
+
+| `valueType` | Explanation |
+|---|---|
+| `Raw` | Original matched bytes, starting with the colon. |
+| `Number` | Decimal number as a sign, magnitude, and base-10 exponent, e.g. negative `125 × 10⁻¹` for `-12.5`. |
+| `Int32` | Signed 32-bit integer. |
+| `Int64` | Signed 64-bit integer. |
+
+JAW currently supports rooted object-key paths such as `$.user.name` and unions of explicit paths such as `$.(id | user.name)`, configured as `Seq(Seq("id"), Seq("user", "name"))`. Matches are emitted in input order. 
+
+<!-- TODO, extend this section once code has been updated -->
+
 ### Top Level Modules
 All the modules except the `UartTx/Rx` modules are wired together in the `Accelerator` module. The `AcceleratorTop` module wires the `Accelerator` module together with `UartTx/Rx`. The bulk of the integration test for the accelerator are written for the `Accelerator` module, while the test written for `AcceleratorTop` mostly test the Uart support. We have split up the modules like this, because it is slow to simulate Uart, and by isolating the Uart support to a different module, we can efficiently test the accelerator without interacting with Uart and without introducing unnecessary wires. 
 
