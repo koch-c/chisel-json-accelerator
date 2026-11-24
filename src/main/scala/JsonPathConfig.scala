@@ -15,28 +15,33 @@ object ValueType {
   case object Int64 extends ValueType
 }
 
-/** Configuration for the currently supported, object-key-only JSON paths. */
-final case class JsonPathConfig(
-    paths: Seq[Seq[String]],
-    maxDepth: Int = 8,
-    attributeId: Int = 0,
+final case class FieldSpec(
+    path: Seq[String],
     valueType: ValueType = ValueType.Raw
-) {
-  require(paths.nonEmpty, "paths must contain at least one path")
-  require(
-    paths.forall(_.nonEmpty),
-    "paths must contain at least one object key"
-  )
-  require(paths.flatten.forall(_.nonEmpty), "path keys must not be empty")
+)
+
+/** Object-key-only query. A field's index is its 8-bit attribute ID. */
+final case class JsonPathConfig(fields: Seq[FieldSpec], maxDepth: Int = 8) {
+  require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
+
+  val paths: Seq[Seq[String]] = fields.map(_.path)
   require(
-    attributeId >= 0 && attributeId <= 255,
-    "attributeId must fit in 8 bits"
+    paths.forall(p => p.nonEmpty && p.forall(_.nonEmpty)),
+    "each path must contain nonempty object keys"
   )
+  require(paths.forall(_.size <= maxDepth), "paths must fit within maxDepth")
+  require(paths.distinct.size == paths.size, "duplicate field paths")
+  require(
+    !paths.exists(p => paths.exists(q => q.size > p.size && q.startsWith(p))),
+    "a scalar field cannot be a parent of another field"
+  )
+
+  val attributeIds: Map[Seq[String], Int] = paths.zipWithIndex.toMap
 
   /** Distinct keys across all paths, in key-symbol code order. */
-  def keys: Seq[String] = paths.flatten.distinct
+  val keys: Seq[String] = paths.flatten.distinct
 
   /** Stable key-symbol codes expected from the path encoder. */
-  def keyIds: Map[String, Int] = keys.zipWithIndex.toMap
+  val keyIds: Map[String, Int] = keys.zipWithIndex.toMap
 }

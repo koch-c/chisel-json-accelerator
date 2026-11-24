@@ -75,7 +75,7 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   "AcceleratorTop" should "connect UART RX through the core to unmodified UART TX" in {
     exchange(
-      JsonPathConfig(Seq(Seq("v"))),
+      JsonPathConfig(Seq(FieldSpec(Seq("v")))),
       "{\"v\":1}\n",
       Seq(':'.toInt, '1'.toInt)
     )
@@ -84,13 +84,9 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "send a number frame over UART" in {
     // -12.5 is mantissa 125 with exp10 -1. Flags: negative and isFloat.
     exchange(
-      JsonPathConfig(
-        Seq(Seq("v")),
-        attributeId = 7,
-        valueType = ValueType.Number
-      ),
+      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.Number))),
       "{\"v\":-12.5}\n",
-      Seq(7, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff)
+      Seq(0, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff)
     )
   }
 }

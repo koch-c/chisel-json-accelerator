@@ -4,7 +4,7 @@ import chisel3.util._
 /** Sends one ParsedNumber as a binary frame. All values are sent least
   * significant byte first.
   *
-  * byte 0 attribute id byte 1 flags: bit 0 negative, bit 1 isFloat, bit 2
+  * byte 0 reserved (0x00); byte 1 flags: bit 0 negative, bit 1 isFloat, bit 2
   * overflow, bit 3 notANumber
   *
   * The rest depends on the value type: Number 8 bytes integer (mantissa for a
@@ -58,7 +58,7 @@ class NumberSerializer(valueType: ValueType = ValueType.Number) extends Module {
 
   // Take a number and store the whole frame.
   when(io.in.fire) {
-    frame := VecInit(Seq(n.attributeId, flags) ++ payload)
+    frame := VecInit(Seq(0.U(8.W), flags) ++ payload)
     index := 0.U
     busy := true.B
   }

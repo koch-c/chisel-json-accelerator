@@ -8,8 +8,14 @@ import chisel3.util._
   * byte acceptance by the consumer, not physical UART completion.
   */
 class Accelerator(
-    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))
+    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature"))))
 ) extends Module {
+  private val valueType = config.fields.head.valueType
+  require(
+    config.fields.forall(_.valueType == valueType),
+    "mixed field types require per-field parser routing"
+  )
+
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
     val out = Decoupled(UInt(8.W))
@@ -77,7 +83,7 @@ class Accelerator(
   loader.io.descriptor <> pda.io.descriptor
 
   // Output stage can choose between the raw output or a parsed number.
-  val lastOut = config.valueType match {
+  val lastOut = valueType match {
     case ValueType.Raw =>
       io.out.valid := loader.io.out.valid
       io.out.bits := loader.io.out.bits.data
@@ -86,7 +92,7 @@ class Accelerator(
     case _ =>
       val parser = withReset(recordReset) { Module(new NumberParser) }
       val serializer = withReset(recordReset) {
-        Module(new NumberSerializer(config.valueType))
+        Module(new NumberSerializer(valueType))
       }
       parser.io.in <> loader.io.out
       serializer.io.in <> parser.io.out

@@ -6,7 +6,6 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   /** The 12 bytes expected for a number, following the frame layout. */
   def frame(
-      id: Int,
       negative: Boolean,
       isFloat: Boolean,
       overflow: Boolean,
@@ -17,7 +16,7 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
     val flags = (if (negative) 1 else 0) | (if (isFloat) 2
                                             else 0) | (if (overflow) 4 else 0) |
       (if (notANumber) 8 else 0)
-    Seq(id, flags) ++
+    Seq(0, flags) ++
       (0 until 8).map(i => ((value >> (8 * i)) & 0xff).toInt) ++
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
@@ -99,7 +98,6 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       collect(
         c,
         frame(
-          3,
           negative = false,
           isFloat = false,
           overflow = false,
@@ -122,7 +120,7 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
         isFloat = true,
         overflow = false
       )
-      collect(c, Seq(7, 3, 0xd2, 0x04, 0, 0, 0, 0, 0, 0, 0xfe, 0xff))
+      collect(c, Seq(0, 3, 0xd2, 0x04, 0, 0, 0, 0, 0, 0, 0xfe, 0xff))
     }
   }
 
@@ -139,7 +137,7 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
         isFloat = false,
         overflow = true
       )
-      collect(c, Seq(255, 4, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0))
+      collect(c, Seq(0, 4, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0))
     }
   }
 
@@ -158,7 +156,6 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       collect(
         c,
         frame(
-          1,
           negative = false,
           isFloat = true,
           overflow = false,
@@ -180,7 +177,6 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       collect(
         c,
         frame(
-          2,
           negative = true,
           isFloat = false,
           overflow = false,
@@ -204,15 +200,13 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
         overflow = false,
         notANumber = true
       )
-      collect(c, Seq(9, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+      collect(c, Seq(0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
   }
 
   /** The frame for an integer type: header, then the value in `bytes` bytes. */
-  def intFrame(id: Int, flags: Int, value: BigInt, bytes: Int): Seq[Int] =
-    Seq(id, flags) ++ (0 until bytes).map(i =>
-      ((value >> (8 * i)) & 0xff).toInt
-    )
+  def intFrame(flags: Int, value: BigInt, bytes: Int): Seq[Int] =
+    Seq(0, flags) ++ (0 until bytes).map(i => ((value >> (8 * i)) & 0xff).toInt)
 
   def submitInt(
       c: NumberSerializer,
@@ -235,11 +229,11 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "send an Int32 in two's complement" in {
     test(new NumberSerializer(ValueType.Int32)) { c =>
       submitInt(c, 1, negative = false, magnitude = 25)
-      collect(c, Seq(1, 0, 25, 0, 0, 0))
+      collect(c, Seq(0, 0, 25, 0, 0, 0))
       submitInt(c, 2, negative = true, magnitude = 7)
-      collect(c, Seq(2, 1, 0xf9, 0xff, 0xff, 0xff))
+      collect(c, Seq(0, 1, 0xf9, 0xff, 0xff, 0xff))
       submitInt(c, 3, negative = true, magnitude = 0)
-      collect(c, Seq(3, 1, 0, 0, 0, 0))
+      collect(c, Seq(0, 1, 0, 0, 0, 0))
     }
   }
 
@@ -247,13 +241,13 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new NumberSerializer(ValueType.Int32)) { c =>
       val max = (BigInt(1) << 31) - 1
       submitInt(c, 0, negative = false, magnitude = max)
-      collect(c, intFrame(0, 0, max, 4))
+      collect(c, intFrame(0, max, 4))
       submitInt(c, 0, negative = false, magnitude = max + 1)
-      collect(c, intFrame(0, 4, max + 1, 4))
+      collect(c, intFrame(4, max + 1, 4))
       submitInt(c, 0, negative = true, magnitude = max + 1)
       collect(c, Seq(0, 1, 0, 0, 0, 0x80))
       submitInt(c, 0, negative = true, magnitude = max + 2)
-      collect(c, intFrame(0, 5, -(max + 2), 4))
+      collect(c, intFrame(5, -(max + 2), 4))
     }
   }
 
@@ -263,13 +257,13 @@ class NumberSerializerSpec extends AnyFlatSpec with ChiselScalatestTester {
       submitInt(c, 0, negative = true, magnitude = 1)
       collect(c, Seq(0, 1) ++ Seq.fill(8)(0xff))
       submitInt(c, 0, negative = false, magnitude = max)
-      collect(c, intFrame(0, 0, max, 8))
+      collect(c, intFrame(0, max, 8))
       submitInt(c, 0, negative = false, magnitude = max + 1)
-      collect(c, intFrame(0, 4, max + 1, 8))
+      collect(c, intFrame(4, max + 1, 8))
       submitInt(c, 0, negative = true, magnitude = max + 1)
-      collect(c, intFrame(0, 1, -(max + 1), 8))
+      collect(c, intFrame(1, -(max + 1), 8))
       submitInt(c, 0, negative = true, magnitude = max + 2)
-      collect(c, intFrame(0, 5, -(max + 2), 8))
+      collect(c, intFrame(5, -(max + 2), 8))
     }
   }
 
