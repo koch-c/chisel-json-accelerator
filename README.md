@@ -57,7 +57,7 @@ flowchart LR
 <!-- TODO: Document the NumberParser and NumberSerializer output path. -->
 
 ### Parameterization
-The hardware generator takes a `JsonPathConfig` with these parameters:
+Our hardware generator takes a `JsonPathConfig` with these parameters:
 
 | Parameter | Explanation |
 |---|---|
