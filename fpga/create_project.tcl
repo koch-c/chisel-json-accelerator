@@ -17,7 +17,7 @@ if {![file exists $top_sv]} {
   error "$top_sv not found. Run: sbt \"runMain GenerateAcceleratorTop\""
 }
 add_files -norecurse [list $top_sv]
-add_files -fileset constrs_1 -norecurse [list [file join $root Nexys4DDR_Master.xdc]]
+add_files -fileset constrs_1 -norecurse [list [file join $root fpga constraints Nexys4DDR_Master.xdc]]
 set_property top AcceleratorTop [current_fileset]
 update_compile_order -fileset sources_1
 

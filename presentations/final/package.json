@@ -1,0 +1,16 @@
+{
+  "name": "jaw-final-presentation",
+  "private": true,
+  "scripts": {
+    "dev": "slidev",
+    "build": "slidev build"
+  },
+  "devDependencies": {
+    "@slidev/cli": "53.1.0",
+    "@slidev/theme-default": "0.25.0"
+  },
+  "overrides": {
+    "@vueuse/core": "15.0.0",
+    "@vueuse/math": "15.0.0"
+  }
+}

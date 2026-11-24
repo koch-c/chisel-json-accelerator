@@ -107,72 +107,89 @@ class ChannelFifoSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  for ((enqueueWidth, dequeueWidth, depth) <- Seq((8, 2, 16), (3, 4, 12),
-      (2, 4, 12), (1, 1, 1))) {
+  for (
+    (enqueueWidth, dequeueWidth, depth) <- Seq(
+      (8, 2, 16),
+      (3, 4, 12),
+      (2, 4, 12),
+      (1, 1, 1)
+    )
+  ) {
     it should s"preserve order through randomized stalls and wraparound ($enqueueWidth/$dequeueWidth/$depth)" in {
-      test(new ChannelFifo(UInt(16.W), depth, enqueueWidth, dequeueWidth)) { c =>
-        val random = new Random(42)
-        val expected = mutable.Queue.empty[Int]
-        var pending = Seq.empty[Int]
-        var next = 0
-        var stalled: Option[(Int, Seq[BigInt])] = None
-        var accepted = 0
-        var consumed = 0
-        var simultaneous = 0
+      test(new ChannelFifo(UInt(16.W), depth, enqueueWidth, dequeueWidth)) {
+        c =>
+          val random = new Random(42)
+          val expected = mutable.Queue.empty[Int]
+          var pending = Seq.empty[Int]
+          var next = 0
+          var stalled: Option[(Int, Seq[BigInt])] = None
+          var accepted = 0
+          var consumed = 0
+          var simultaneous = 0
 
-        for (cycle <- 0 until 1200) {
-          val draining = cycle >= 1000
-          if (!draining && pending.isEmpty && random.nextInt(4) != 0) {
-            val count = 1 + random.nextInt(enqueueWidth)
-            pending = next until next + count
-            next += count
-          }
-          c.io.in.valid.poke(pending.nonEmpty.B)
-          c.io.in.bits.count.poke(pending.size.U)
-          for (i <- 0 until enqueueWidth) {
-            c.io.in.bits.entries(i).poke(pending.lift(i).getOrElse(0).U)
-          }
-          val ready = draining || (cycle % 100 >= 25 && random.nextBoolean())
-          c.io.out.ready.poke(ready.B)
-
-          val valid = c.io.out.valid.peek().litToBoolean
-          val count = c.io.out.bits.count.peek().litValue.toInt
-          val data = (0 until dequeueWidth).map(i => c.io.out.bits.entries(i).peek().litValue)
-          stalled.foreach { previous =>
-            assert(valid)
-            assert((count, data) == previous)
-          }
-          stalled = if (valid && !ready) Some((count, data)) else None
-
-          val outputFire = valid && ready
-          if (outputFire) {
-            assert(count >= 1 && count <= dequeueWidth)
-            for (i <- 0 until count) {
-              assert(expected.nonEmpty)
-              assert(data(i) == BigInt(expected.dequeue()))
-              consumed += 1
+          for (cycle <- 0 until 1200) {
+            val draining = cycle >= 1000
+            if (!draining && pending.isEmpty && random.nextInt(4) != 0) {
+              val count = 1 + random.nextInt(enqueueWidth)
+              pending = next until next + count
+              next += count
             }
+            c.io.in.valid.poke(pending.nonEmpty.B)
+            c.io.in.bits.count.poke(pending.size.U)
+            for (i <- 0 until enqueueWidth) {
+              c.io.in.bits.entries(i).poke(pending.lift(i).getOrElse(0).U)
+            }
+            val ready = draining || (cycle % 100 >= 25 && random.nextBoolean())
+            c.io.out.ready.poke(ready.B)
+
+            val valid = c.io.out.valid.peek().litToBoolean
+            val count = c.io.out.bits.count.peek().litValue.toInt
+            val data = (0 until dequeueWidth).map(i =>
+              c.io.out.bits.entries(i).peek().litValue
+            )
+            stalled.foreach { previous =>
+              assert(valid)
+              assert((count, data) == previous)
+            }
+            stalled = if (valid && !ready) Some((count, data)) else None
+
+            val outputFire = valid && ready
+            if (outputFire) {
+              assert(count >= 1 && count <= dequeueWidth)
+              for (i <- 0 until count) {
+                assert(expected.nonEmpty)
+                assert(data(i) == BigInt(expected.dequeue()))
+                consumed += 1
+              }
+            }
+            val inputFire =
+              pending.nonEmpty && c.io.in.ready.peek().litToBoolean
+            if (inputFire) {
+              expected ++= pending
+              accepted += pending.size
+              pending = Seq.empty
+            }
+            if (inputFire && outputFire) simultaneous += 1
+            assert(expected.size <= depth)
+            c.clock.step()
           }
-          val inputFire = pending.nonEmpty && c.io.in.ready.peek().litToBoolean
-          if (inputFire) {
-            expected ++= pending
-            accepted += pending.size
-            pending = Seq.empty
-          }
-          if (inputFire && outputFire) simultaneous += 1
-          assert(expected.size <= depth)
-          c.clock.step()
-        }
-        assert(pending.isEmpty && expected.isEmpty)
-        assert(accepted == consumed && consumed > 100)
-        if (depth > 1) assert(simultaneous > 0)
-        c.io.out.valid.expect(false.B)
+          assert(pending.isEmpty && expected.isEmpty)
+          assert(accepted == consumed && consumed > 100)
+          if (depth > 1) assert(simultaneous > 0)
+          c.io.out.valid.expect(false.B)
       }
     }
   }
 
   it should "preserve bundle metadata with each entry" in {
-    test(new ChannelFifo(new AttributeByte, depth = 8, enqueueWidth = 2, dequeueWidth = 1)) { c =>
+    test(
+      new ChannelFifo(
+        new AttributeByte,
+        depth = 8,
+        enqueueWidth = 2,
+        dequeueWidth = 1
+      )
+    ) { c =>
       c.io.out.ready.poke(false.B)
       c.io.in.valid.poke(true.B)
       c.io.in.bits.count.poke(2.U)
