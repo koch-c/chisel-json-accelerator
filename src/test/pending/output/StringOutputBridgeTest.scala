@@ -16,7 +16,13 @@ class StringOutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   "The execution stage" should "deliver StringParser strings to the OutputStage" in {
     val layout = OutputLayout(
-      Seq(IntAttr(32), StringAttr(8), StringAttr(4), StringAttr(8), StringAttr(3))
+      Seq(
+        IntAttr(32),
+        StringAttr(8),
+        StringAttr(4),
+        StringAttr(8),
+        StringAttr(3)
+      )
     )
     val json =
       """{"id":7,"name":"john","bad":12,"esc":"a\"b\n","long":"abcdef"}"""
@@ -26,8 +32,9 @@ class StringOutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
         json,
         Seq(0 -> "id", 1 -> "name", 2 -> "bad", 3 -> "esc", 4 -> "long")
       )
-      val expected = Seq(0x1b) ++ le(7, 4) ++ text("john", 8) ++ Seq.fill(4)(0) ++
-        Seq('a', '"', 'b', '\n').map(_.toInt).padTo(8, 0) ++ text("abc", 3)
+      val expected =
+        Seq(0x1b) ++ le(7, 4) ++ text("john", 8) ++ Seq.fill(4)(0) ++
+          Seq('a', '"', 'b', '\n').map(_.toInt).padTo(8, 0) ++ text("abc", 3)
       assert(output == expected, s"Unexpected output: $output")
     }
   }
@@ -39,7 +46,11 @@ class StringOutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
     )
     test(harness(layout)) { c =>
       val (kept, _) =
-        playRecord(c, """{"id":1,"name":"jo\"n"}""", Seq(0 -> "id", 1 -> "name"))
+        playRecord(
+          c,
+          """{"id":1,"name":"jo\"n"}""",
+          Seq(0 -> "id", 1 -> "name")
+        )
       assert(kept == Seq(0x03) ++ le(1, 4) ++ text("jo\"n", 8))
       val (gone, dropped) =
         playRecord(c, """{"name":"john","id":2}""", Seq(1 -> "name", 0 -> "id"))
