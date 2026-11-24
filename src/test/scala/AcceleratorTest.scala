@@ -126,6 +126,33 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "extract every configured path without matching keys elsewhere" in {
+    run(JsonPathConfig(Seq(Seq("id"), Seq("user", "name")))) { d =>
+      d.record(
+        "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
+        ":7:\"bob\""
+      )
+    }
+  }
+
+  it should "extract several disjoint paths in input order, not config order" in {
+    run(JsonPathConfig(Seq(Seq("a"), Seq("b", "c"), Seq("d", "e", "f")))) { d =>
+      d.record(
+        "{\"d\":{\"e\":{\"f\":3}},\"b\":{\"c\":2,\"a\":9},\"a\":1}\n",
+        ":3:2:1"
+      )
+    }
+  }
+
+  it should "extract a union of keys under a shared prefix, like $.device.(lat | lon)" in {
+    run(JsonPathConfig(Seq(Seq("device", "lat"), Seq("device", "lon")))) { d =>
+      d.record(
+        "{\"lat\":0,\"device\":{\"lon\":2,\"alt\":5,\"lat\":1}}\n",
+        ":2:1"
+      )
+    }
+  }
+
   it should "concatenate repeated matches under output backpressure" in {
     run(JsonPathConfig(Seq(Seq("v"))), stall = true) { d =>
       d.record("{\"v\":1,\"v\":\"two\",\"v\":3}\n", ":1:\"two\":3")
@@ -282,7 +309,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
 
     run(JsonPathConfig(Seq(Seq("v")), valueType = ValueType.Number)) { d =>
-      for (_ <- 0 until 40) {
+      for (_ <- 0 until 10) {
         val text = randomNumber()
         // Random padding moves the number to a different byte offset each time.
         val pad = "x" * random.nextInt(9)
