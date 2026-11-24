@@ -201,6 +201,36 @@ class OutputBridgeSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "only output records whose number is greater than 5" in {
+    // $[?(temperature > 5)].(temperature::int(32) | humidity::int(32))
+    val layout = OutputLayout(
+      Seq(IntAttr(32), IntAttr(32)),
+      Seq(Comparison(0, CompareOp.Gt, IntLit(5)))
+    )
+    test(new ExecutionHarness(layout)) { c =>
+      def record(temperature: String): (Seq[Int], Int) = playRecord(
+        c,
+        s"""{"temperature":$temperature,"humidity":60}""",
+        Seq(0 -> "temperature", 1 -> "humidity")
+      )
+      def frame(temperature: BigInt): Seq[Int] =
+        Seq(0x03) ++ le(temperature, 4) ++ le(60, 4)
+
+      for (kept <- Seq(BigInt(6), BigInt(100), BigInt(Int.MaxValue))) {
+        val (output, dropped) = record(kept.toString)
+        assert(output == frame(kept), s"$kept > 5 was not output: $output")
+        assert(dropped == 0)
+      }
+      // 5 is not greater than 5; 5.5 is not an int, and "warm" is not a
+      // number, so both are absent, and a comparison on an absent value fails.
+      for (value <- Seq("5", "3", "0", "-10", "5.5", "\"warm\"")) {
+        val (output, dropped) = record(value)
+        assert(output.isEmpty, s"$value should have been filtered: $output")
+        assert(dropped == 1)
+      }
+    }
+  }
+
   "StringFrameToBeats" should "turn StringParser frames into beats, under backpressure" in {
     test(new StringFrameToBeats) { c =>
       // Frame: id, bytes, 0x00, flags.
