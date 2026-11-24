@@ -8,7 +8,8 @@ import chisel3.util._
   * byte acceptance by the consumer, not physical UART completion.
   */
 class Accelerator(
-    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))
+    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature"))),
+    pdaWidth: Int = 2
 ) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
@@ -33,11 +34,13 @@ class Accelerator(
         new JsonSymbol(config.keyIds.size, 12),
         depth = 32,
         enqueueWidth = 8,
-        dequeueWidth = 2
+        dequeueWidth = pdaWidth
       )
     )
   }
-  val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
+  val pda = withReset(recordReset) {
+    Module(new PushdownAutomaton(config, pdaWidth))
+  }
   val loader = withReset(recordReset) { Module(new AttributeLoader) }
   val buffer = Module(new InputBuffer)
 

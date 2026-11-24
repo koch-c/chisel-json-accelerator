@@ -18,30 +18,53 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   private def send(
       c: PushdownAutomaton,
       symbols: Seq[TestSymbol],
-      config: JsonPathConfig
+      config: JsonPathConfig,
+      pdaWidth: Int = 2
   ): (Seq[Result], Int) = {
     val results = scala.collection.mutable.ArrayBuffer.empty[Result]
     var endOfRecords = 0
     val keyIdWidth = math.max(1, chisel3.util.log2Ceil(config.keyIds.size))
 
-    for (batch <- symbols.grouped(2)) {
-      c.io.in.valid.poke(true.B)
-      c.io.in.bits.count.poke(batch.length.U)
-      for (lane <- 0 until 2) {
-        if (lane < batch.length) {
-          val symbol = batch(lane)
-          c.io.in.bits.entries(lane).kind.poke(symbol.kind)
-          c.io.in.bits.entries(lane).keyId.poke(symbol.keyId.U(keyIdWidth.W))
-          c.io.in.bits.entries(lane).addr.poke(symbol.address.U)
-        } else {
-          c.io.in.bits.entries(lane).kind.poke(SymbolKind.Comma)
-          c.io.in.bits.entries(lane).keyId.poke(0.U)
-          c.io.in.bits.entries(lane).addr.poke(0.U)
+    for (batch <- symbols.grouped(pdaWidth)) {
+      var accepted = false
+      var waited = 0
+      while (!accepted && waited < 2000) {
+        c.io.in.valid.poke(true.B)
+        c.io.in.bits.count.poke(batch.length.U)
+        for (lane <- 0 until pdaWidth) {
+          if (lane < batch.length) {
+            val symbol = batch(lane)
+            c.io.in.bits.entries(lane).kind.poke(symbol.kind)
+            c.io.in.bits.entries(lane).keyId.poke(symbol.keyId.U(keyIdWidth.W))
+            c.io.in.bits.entries(lane).addr.poke(symbol.address.U)
+          } else {
+            c.io.in.bits.entries(lane).kind.poke(SymbolKind.Comma)
+            c.io.in.bits.entries(lane).keyId.poke(0.U)
+            c.io.in.bits.entries(lane).addr.poke(0.U)
+          }
         }
-      }
 
+        c.io.descriptor.ready.poke(true.B)
+        if (c.io.descriptor.valid.peek().litToBoolean) {
+          results += Result(
+            c.io.descriptor.bits.attributeId.peek().litValue,
+            c.io.descriptor.bits.startAddress.peek().litValue,
+            c.io.descriptor.bits.length.peek().litValue
+          )
+        }
+        if (c.io.endOfRecord.peek().litToBoolean) endOfRecords += 1
+        accepted = c.io.in.ready.peek().litToBoolean
+        c.clock.step()
+        waited += 1
+      }
+      assert(accepted, "PDA input batch remained stalled")
+    }
+
+    c.io.in.valid.poke(false.B)
+    var quietCycles = 0
+    var drainCycles = 0
+    while (quietCycles < 2 && drainCycles < 2000) {
       c.io.descriptor.ready.poke(true.B)
-      c.io.in.ready.expect(true.B)
       if (c.io.descriptor.valid.peek().litToBoolean) {
         results += Result(
           c.io.descriptor.bits.attributeId.peek().litValue,
@@ -51,9 +74,12 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
       if (c.io.endOfRecord.peek().litToBoolean) endOfRecords += 1
       c.clock.step()
+      if (c.io.descriptor.valid.peek().litToBoolean) quietCycles = 0
+      else quietCycles += 1
+      drainCycles += 1
     }
 
-    c.io.in.valid.poke(false.B)
+    assert(drainCycles < 2000, "Timed out draining PDA descriptors")
     (results.toSeq, endOfRecords)
   }
 
@@ -164,6 +190,9 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.io.in.bits.entries(lane).keyId.poke(symbol.keyId.U)
         c.io.in.bits.entries(lane).addr.poke(symbol.address.U)
       }
+      c.io.in.ready.expect(true.B)
+      c.clock.step()
+
       c.io.descriptor.valid.expect(true.B)
       c.io.descriptor.bits.attributeId.expect(3.U)
       c.io.descriptor.bits.startAddress.expect(14.U)

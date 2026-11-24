@@ -28,7 +28,8 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   * Lexer and attribute-loader branches. The Lexer recognizes key strings and
   * emits `JsonSymbol`s; this module only tracks path state and JSON nesting.
   */
-class PushdownAutomaton(config: JsonPathConfig) extends Module {
+class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
+    extends Module {
   private val paths = config.paths
   private val maxDepth = config.maxDepth
   private val keyIds = config.keyIds
@@ -66,7 +67,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
     // ChannelFifo emits batches of up to two ordered JSON symbols to the PDA.
     val in = Flipped(
-      Decoupled(new ChannelBatch(new JsonSymbol(keyIds.size), width = 2))
+      Decoupled(new ChannelBatch(new JsonSymbol(keyIds.size), width = pdaWidth))
     )
     // Matches use the exact descriptor consumed by AttributeLoader.
     val descriptor = Decoupled(new AttributeDescriptor)
@@ -78,8 +79,8 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   })
 
   val state = RegInit(0.U.asTypeOf(new PdaState(trieStateCount - 1, maxDepth)))
-  val pendingDescriptor = RegInit(false.B)
-  val pendingDescriptorBits = Reg(new AttributeDescriptor)
+  val pendingDescriptors = Reg(Vec(pdaWidth, new AttributeDescriptor))
+  val pendingCount = RegInit(0.U(log2Ceil(pdaWidth + 1).W))
   val pendingEndOfRecord = RegInit(false.B)
 
   /** Transition.
@@ -194,61 +195,77 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     (next, project, projectAddress, projectLength, endOfRecord)
   }
 
-  // Two concurrent symbols are processed. The valid entry, says within the entries are there a valid symbol.
-  val valid0 = io.in.valid && io.in.bits.count > 0.U
-  val valid1 = io.in.valid && io.in.bits.count > 1.U
-  val (after0, project0, address0, length0, eor0) =
-    transition(state, io.in.bits.entries(0), valid0)
-  val (after1, project1, address1, length1, eor1) =
-    transition(after0, io.in.bits.entries(1), valid1)
+  // Creating transitions for each lane in the dynamic sized processing.
+  var stateAfterPrevious = state
+  val transitions = (0 until pdaWidth).map { lane =>
+    val symbolValid = io.in.valid && io.in.bits.count > lane.U
+    val result =
+      transition(stateAfterPrevious, io.in.bits.entries(lane), symbolValid)
+    stateAfterPrevious = result._1
+    result
+  }
 
-  // AttributeLoader accepts one descriptor per cycle. If both PDA stages
-  // finish projections together, retain the second until the loader accepts it.
-  val firstProject = project0 || project1
-  val firstAddress = Mux(project0, address0, address1)
-  val firstLength = Mux(project0, length0, length1)
-  val hasSecondProject = project0 && project1
+  val stateAfterBatch = stateAfterPrevious
 
-  io.descriptor.valid := pendingDescriptor || firstProject
-  io.descriptor.bits.attributeId := Mux(
-    pendingDescriptor,
-    pendingDescriptorBits.attributeId,
-    config.attributeId.U(8.W)
-  )
-  io.descriptor.bits.startAddress := Mux(
-    pendingDescriptor,
-    pendingDescriptorBits.startAddress,
-    firstAddress
-  )
-  io.descriptor.bits.length := Mux(
-    pendingDescriptor,
-    pendingDescriptorBits.length,
-    firstLength
-  )
+  val projectFlags = transitions.map(_._2)
+  val batchEndRecords = transitions.map(_._5).reduce(_ || _)
 
-  // Do not consume another batch while a second descriptor is buffered. When
-  // producing the first descriptor, accept input only if the loader accepts it.
-  io.in.ready := !pendingDescriptor && (!firstProject || io.descriptor.ready)
+  val projectCount = PopCount(projectFlags)
+
+  def projectsBefore(lane: Int): UInt =
+    if (lane == 0) 0.U else PopCount(projectFlags.take(lane))
+
+  val descCandidates = transitions.map { result =>
+    val descriptor = Wire(new AttributeDescriptor)
+    descriptor.attributeId := config.attributeId.U(8.W)
+    descriptor.startAddress := result._3
+    descriptor.length := result._4
+    descriptor
+  }
+
+  io.descriptor.valid := pendingCount =/= 0.U
+  io.descriptor.bits := pendingDescriptors(0)
+  val dequeueDescriptor = io.descriptor.fire
+  val retainedCount = pendingCount - dequeueDescriptor.asUInt
+  val availableCount = pdaWidth.U - retainedCount
+  val batchFits = projectCount <= availableCount
+  val batchRespectsRecordBoundary =
+    !batchEndRecords || retainedCount === 0.U
+  io.in.ready := !pendingEndOfRecord && batchFits && batchRespectsRecordBoundary
+
   when(io.in.fire) {
-    state := after1
-    when(hasSecondProject) {
-      pendingDescriptor := true.B
-      pendingDescriptorBits.attributeId := config.attributeId.U(8.W)
-      pendingDescriptorBits.startAddress := address1
-      pendingDescriptorBits.length := length1
+    state := stateAfterBatch
+    pendingEndOfRecord := batchEndRecords && projectCount =/= 0.U
+  }
+  when(dequeueDescriptor) {
+    for (slot <- 0 until pdaWidth - 1) {
+      pendingDescriptors(slot) := pendingDescriptors(slot + 1)
     }
   }
-  when(io.descriptor.fire && pendingDescriptor) {
-    pendingDescriptor := false.B
+  for (slot <- 0 until pdaWidth) {
+    val choices = (0 until pdaWidth).map { lane =>
+      (
+        projectFlags(lane) &&
+          (retainedCount + projectsBefore(lane) === slot.U)
+      ) -> descCandidates(lane)
+    }
+    when(
+      io.in.fire && slot.U >= retainedCount && slot.U < retainedCount + projectCount
+    ) {
+      pendingDescriptors(slot) := PriorityMux(choices)
+    }
+  }
+  when(io.in.fire || dequeueDescriptor) {
+    pendingCount := retainedCount + Mux(io.in.fire, projectCount, 0.U)
   }
 
   // Delay end-of-record until any second descriptor from that input batch has
   // been accepted by the loader.
-  when(io.in.fire) {
-    pendingEndOfRecord := (eor0 || eor1) && hasSecondProject
+  io.endOfRecord := (io.in.fire && batchEndRecords && projectCount === 0.U) ||
+    (dequeueDescriptor && pendingCount === 1.U && pendingEndOfRecord)
+  when(io.endOfRecord) {
+    pendingEndOfRecord := false.B
   }
-  io.endOfRecord := (io.in.fire && (eor0 || eor1) && !hasSecondProject) ||
-    (io.descriptor.fire && pendingDescriptor && pendingEndOfRecord)
 
   io.found := state.found
   io.done := state.done
