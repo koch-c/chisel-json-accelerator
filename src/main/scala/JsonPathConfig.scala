@@ -20,8 +20,21 @@ final case class FieldSpec(
     valueType: ValueType = ValueType.Raw
 )
 
-/** Object-key-only query. A field's index is its 8-bit attribute ID. */
-final case class JsonPathConfig(fields: Seq[FieldSpec], maxDepth: Int = 8) {
+/** A filter on a projected field, identified by its full path. */
+final case class FilterSpec(
+    path: Seq[String],
+    op: CompareOp,
+    value: FilterValue
+)
+
+/** Object-key-only query. A field's index is its 8-bit attribute ID. Filters
+  * are configuration only; the accelerator does not apply them yet.
+  */
+final case class JsonPathConfig(
+    fields: Seq[FieldSpec],
+    maxDepth: Int = 8,
+    filters: Seq[FilterSpec] = Nil
+) {
   require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
 
@@ -38,6 +51,10 @@ final case class JsonPathConfig(fields: Seq[FieldSpec], maxDepth: Int = 8) {
   )
 
   val attributeIds: Map[Seq[String], Int] = paths.zipWithIndex.toMap
+  require(
+    filters.forall(filter => attributeIds.contains(filter.path)),
+    "filters must reference projected fields"
+  )
 
   /** Distinct keys across all paths, in key-symbol code order. */
   val keys: Seq[String] = paths.flatten.distinct
