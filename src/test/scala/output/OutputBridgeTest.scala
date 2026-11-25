@@ -27,7 +27,12 @@ class ExecutionHarness(
 
   val buffer = Module(new InputBuffer)
   val reorder = Module(new ReorderWriter)
-  val loader = Module(new AttributeLoader)
+  // One raw channel: the loader only fetches here. Routing by type is done by
+  // the AttributeRouter and the reorder entries come from the ReorderWriter.
+  val loader = Module(
+    new AttributeLoader(JsonPathConfig(Seq(FieldSpec(Seq("unused")))))
+  )
+  val unpacker = Module(new WordUnpacker)
   val router = Module(new AttributeRouter(layout))
   val numberParser = Module(new NumberParser)
   val numbers = Module(new NumberToValue(layout))
@@ -36,10 +41,8 @@ class ExecutionHarness(
   buffer.io.writeEnable := io.writeEnable
   buffer.io.writeAddress := io.writeAddress
   buffer.io.writeData := io.writeData
-  // The loader's read port is Decoupled; this harness has a single reader.
-  buffer.io.readEnable := loader.io.read.valid
-  buffer.io.readAddress := loader.io.read.bits
-  loader.io.read.ready := true.B
+  buffer.io.readEnable := loader.io.readEnable
+  buffer.io.readAddress := loader.io.readAddress
   loader.io.readData := buffer.io.readData
   loader.io.readValid := buffer.io.readValid
 
@@ -48,7 +51,9 @@ class ExecutionHarness(
   loader.io.descriptor <> reorder.io.out
   stage.io.reorder <> reorder.io.reorder
 
-  router.io.in <> loader.io.out
+  unpacker.io.in <> loader.io.channels(0)
+  loader.io.reorder.ready := true.B
+  router.io.in <> unpacker.io.out
   numberParser.io.in <> router.io.numbers
   numbers.io.in <> numberParser.io.out
   stage.io.ints <> numbers.io.ints

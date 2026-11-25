@@ -3,8 +3,8 @@ import chisel3.util._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** A ParserBank with the InputBuffer it reads from. */
-class ParserBankHarness(config: JsonPathConfig) extends Module {
+/** An ExecutionStage with the InputBuffer it reads from. */
+class ExecutionStageHarness(config: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
     val writeEnable = Input(Bool())
     val writeAddress = Input(UInt(9.W))
@@ -14,26 +14,26 @@ class ParserBankHarness(config: JsonPathConfig) extends Module {
     val busy = Output(Bool())
   })
   val buffer = Module(new InputBuffer)
-  val bank = Module(new ParserBank(config))
+  val stage = Module(new ExecutionStage(config))
   buffer.io.writeEnable := io.writeEnable
   buffer.io.writeAddress := io.writeAddress
   buffer.io.writeData := io.writeData
-  buffer.io.readEnable := bank.io.readEnable
-  buffer.io.readAddress := bank.io.readAddress
-  bank.io.readData := buffer.io.readData
-  bank.io.readValid := buffer.io.readValid
-  bank.io.descriptor <> io.descriptor
-  io.out <> bank.io.out
-  io.busy := bank.io.busy
+  buffer.io.readEnable := stage.io.readEnable
+  buffer.io.readAddress := stage.io.readAddress
+  stage.io.readData := buffer.io.readData
+  stage.io.readValid := buffer.io.readValid
+  stage.io.descriptor <> io.descriptor
+  io.out <> stage.io.out
+  io.busy := stage.io.busy
 }
 
-class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
+class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   /** Drives the harness. Attributes are written to the buffer one after the
     * other and submitted as descriptors; the output bytes are collected. With
     * stall, output is only accepted every third cycle.
     */
-  private class Driver(c: ParserBankHarness, stall: Boolean) {
+  private class Driver(c: ExecutionStageHarness, stall: Boolean) {
     val output = scala.collection.mutable.ArrayBuffer.empty[Int]
     var allowOutput = true
     private var cycles = 0
@@ -111,7 +111,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
         tick()
         waited += 1
       }
-      assert(waited < 5000, "The bank stayed busy")
+      assert(waited < 5000, "The execution stage stayed busy")
       for (_ <- 0 until 4) tick()
     }
   }
@@ -119,7 +119,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
   private def run(config: JsonPathConfig, stall: Boolean = false)(
       body: Driver => Unit
   ): Unit =
-    test(new ParserBankHarness(config))(c => body(new Driver(c, stall)))
+    test(new ExecutionStageHarness(config))(c => body(new Driver(c, stall)))
 
   private def bytes(text: String): Seq[Int] =
     text.getBytes("UTF-8").map(_ & 0xff).toSeq
@@ -131,7 +131,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     Seq(id, if (value < 0) 1 else 0) ++
       (0 until 4).map(i => (value >> (8 * i)) & 0xff)
 
-  behavior of "ParserBank"
+  behavior of "ExecutionStage"
 
   it should "be idle after reset" in {
     run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
@@ -140,7 +140,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "send raw attributes in dispatch order with one lane" in {
+  it should "send raw attributes in dispatch order with one channel" in {
     run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
       d.run(Seq(":1" -> 0, ":\"two\"" -> 0, ": 3 " -> 0))
       d.waitUntilIdle()
@@ -183,7 +183,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "hold a descriptor back while every lane of its type is in use" in {
+  it should "queue more attributes than it has channels while the output is blocked" in {
     val config = JsonPathConfig(
       Seq(FieldSpec(Seq("v"), ValueType.Int32)),
       parsersPerType = 2
@@ -191,18 +191,73 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     run(config) { d =>
       d.allowOutput = false
       val starts = d.load(Seq(": 1", ": 2", ": 3"))
-      assert(d.submit(starts(0), 3, 0))
-      assert(d.submit(starts(1), 3, 0))
-      // Both lanes hold a frame that cannot leave, so the third must wait.
-      assert(!d.submit(starts(2), 3, 0, patience = 40))
+      // The third attribute waits in the FIFO of the first channel.
+      for (start <- starts) assert(d.submit(start, 3, 0))
+      for (_ <- 0 until 40) d.tick()
       assert(d.output.isEmpty)
       d.allowOutput = true
-      assert(d.submit(starts(2), 3, 0))
       d.waitUntilIdle()
       assert(
         d.output.toSeq ==
           int32Frame(0, 1) ++ int32Frame(0, 2) ++ int32Frame(0, 3)
       )
+    }
+  }
+
+  it should "hold the loader back while a channel FIFO is full" in {
+    val config = JsonPathConfig(
+      Seq(
+        FieldSpec(Seq("n"), ValueType.Int32),
+        FieldSpec(Seq("s"), ValueType.String)
+      )
+    )
+    // Longer than the four words a channel FIFO holds.
+    val long =
+      "a string that needs many more words than one channel FIFO can hold"
+    val attributes = Seq(": 1", ":\"" + long + "\"", ": 2")
+    run(config) { d =>
+      d.allowOutput = false
+      val starts = d.load(attributes)
+      def submit(i: Int, patience: Int = 2000): Boolean =
+        d.submit(
+          starts(i),
+          attributes(i).length,
+          if (i == 1) 1 else 0,
+          patience
+        )
+      assert(submit(0))
+      assert(submit(1))
+      // The loader is stuck in the middle of the string, so it takes nothing.
+      assert(!submit(2, patience = 60))
+      assert(d.output.isEmpty)
+      d.allowOutput = true
+      assert(submit(2))
+      d.waitUntilIdle()
+      assert(
+        d.output.toSeq ==
+          int32Frame(0, 1) ++ stringFrame(1, long) ++ int32Frame(0, 2)
+      )
+    }
+  }
+
+  it should "hold a descriptor back while the reorder FIFO is full" in {
+    val config = JsonPathConfig(
+      Seq(FieldSpec(Seq("v"), ValueType.Int32)),
+      parsersPerType = 4
+    )
+    val values = 1 to 20
+    val attributes = values.map(v => f":$v%2d")
+    run(config) { d =>
+      d.allowOutput = false
+      val starts = d.load(attributes)
+      // The reorder FIFO holds 16 entries and none can leave.
+      for (i <- 0 until 16) assert(d.submit(starts(i), 3, 0))
+      assert(!d.submit(starts(16), 3, 0, patience = 60))
+      assert(d.output.isEmpty)
+      d.allowOutput = true
+      for (i <- 16 until 20) assert(d.submit(starts(i), 3, 0))
+      d.waitUntilIdle()
+      assert(d.output.toSeq == values.flatMap(v => int32Frame(0, v)))
     }
   }
 
@@ -218,19 +273,19 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "give the same output with one lane and with four" in {
+  it should "give the same output with one channel and with four" in {
     val random = new scala.util.Random(7)
     val attributes = Seq.fill(24) {
       val spaces = " " * random.nextInt(4)
       (s":$spaces${random.nextInt(2000000) - 1000000}$spaces", 0)
     }
-    def outputWith(lanes: Int): Seq[Int] = {
+    def outputWith(channels: Int): Seq[Int] = {
       var result = Seq.empty[Int]
       val config = JsonPathConfig(
         Seq(FieldSpec(Seq("v"), ValueType.Number)),
-        parsersPerType = lanes
+        parsersPerType = channels
       )
-      run(config, stall = lanes > 1) { d =>
+      run(config, stall = channels > 1) { d =>
         d.run(attributes)
         d.waitUntilIdle()
         result = d.output.toSeq

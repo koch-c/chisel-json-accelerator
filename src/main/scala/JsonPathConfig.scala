@@ -72,7 +72,12 @@ final case class JsonPathConfig(
   /** The value types in use, each listed once. Parsers are only generated for
     * these.
     */
-  val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct  
+  val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct
+
+  /** The value type of every parser channel: parsersPerType channels for each
+    * value type in use, e.g. Seq(Int32, Int32, String, String).
+    */
+  val channelTypes: Seq[ValueType] =
+    usedValueTypes.flatMap(t => Seq.fill(parsersPerType)(t))
+
 }
-
-

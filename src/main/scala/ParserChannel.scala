@@ -30,46 +30,39 @@ class WordUnpacker() extends Module {
   }
 }
 
-/** One attribute pipeline: an AttributeLoader followed by the parser for one
-  * value type. Every byte has the same ports whatever its type, so bytes of
-  * different types can sit side by side behind one dispatcher.
+/** One parser channel (SPEAR-JSON Fig. 2, block 4): a FIFO of attribute words,
+  * the unpacker that turns them into bytes, and the parser for one value type.
+  * Every channel has the same ports whatever its type.
   *
-  * Raw sends the loader bytes as they are. Number, Int32 and Int64 go through
-  * NumberParser and NumberSerializer. String goes through StringParser.
+  * Raw sends the attribute bytes as they are. Number, Int32 and Int64 go
+  * through NumberParser and NumberSerializer. String goes through StringParser.
   */
-class ParserLane(valueType: ValueType) extends Module {
+class ParserChannel(valueType: ValueType, fifoDepth: Int = 4) extends Module {
   val io = IO(new Bundle {
-    val descriptor = Flipped(Decoupled(new AttributeDescriptor))
+    val in = Flipped(Decoupled(new AttributeWord))
     val out = Decoupled(UInt(8.W))
     val last = Output(Bool()) // out carries the final byte of the attribute
-
-    // Read port towards the InputBuffer, see AttributeLoader.
-    val read = Decoupled(UInt(9.W))
-    val readData = Input(UInt(64.W))
-    val readValid = Input(Bool())
   })
 
-  val loader = Module(new AttributeLoader)
-  loader.io.descriptor <> io.descriptor
-  io.read <> loader.io.read
-  loader.io.readData := io.readData
-  loader.io.readValid := io.readValid
+  val unpacker = Module(new WordUnpacker)
+  unpacker.io.in <> Queue(io.in, fifoDepth)
+  val bytes = unpacker.io.out
 
   io.last := (valueType match {
     case ValueType.Raw =>
-      io.out.valid := loader.io.out.valid
-      io.out.bits := loader.io.out.bits.data
-      loader.io.out.ready := io.out.ready
-      loader.io.out.bits.last
+      io.out.valid := bytes.valid
+      io.out.bits := bytes.bits.data
+      bytes.ready := io.out.ready
+      bytes.bits.last
     case ValueType.String =>
       val parser = Module(new StringParser)
-      parser.io.in <> loader.io.out
+      parser.io.in <> bytes
       io.out <> parser.io.out
       parser.io.last
     case _ =>
       val parser = Module(new NumberParser)
       val serializer = Module(new NumberSerializer(valueType))
-      parser.io.in <> loader.io.out
+      parser.io.in <> bytes
       serializer.io.in <> parser.io.out
       io.out <> serializer.io.out
       serializer.io.last

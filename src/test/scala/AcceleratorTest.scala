@@ -396,7 +396,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
         "\"" + Seq
           .fill(random.nextInt(12))("abc xyz,}:".charAt(random.nextInt(10)))
           .mkString + "\""
-    // Records with several matches close together, where the lanes overlap.
+    // Records with several matches close together, where the channels overlap.
     val records = Seq.fill(12) {
       val fields = Seq.fill(1 + random.nextInt(5)) {
         val key = Seq("n", "s", "skip")(random.nextInt(3))

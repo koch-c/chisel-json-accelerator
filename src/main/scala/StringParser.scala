@@ -3,7 +3,7 @@ import chisel3.util._
 
 /** Decodes one string attribute and sends it as a frame, one byte per cycle.
   *
-  * The input is the byte stream of a single attribute from the AttributeLoader,
+  * The input is the byte stream of a single attribute from the WordUnpacker,
   * the same as for the NumberParser: it starts at the colon and runs up to the
   * next ',' or '}', e.g. `: "a\nb" `. The final byte has `last` set.
   *

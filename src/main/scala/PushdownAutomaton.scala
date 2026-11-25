@@ -212,7 +212,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   val (after1, project1, address1, length1, id1, eor1) =
     transition(after0, io.in.bits.entries(1), valid1)
 
-  // AttributeLoader accepts one descriptor per cycle. If both PDA stages
+  // The AttributeLoader takes one descriptor at a time. If both PDA stages
   // finish projections together, retain the second until the loader accepts it.
   val firstProject = project0 || project1
   val firstAddress = Mux(project0, address0, address1)

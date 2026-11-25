@@ -3,8 +3,8 @@ import chisel3.util._
 
 /** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
   * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * depends on the value type of the matched path: the exact AttributeLoader
-  * bytes without added framing (Raw), a NumberSerializer frame, or a
+  * depends on the value type of the matched path: the exact bytes of the
+  * attribute without added framing (Raw), a NumberSerializer frame, or a
   * StringParser frame. Values are sent in document order. done pulses for one
   * cycle after LF, parsing, and all output transfers finish. It denotes byte
   * acceptance by the consumer, not physical UART completion.
@@ -12,7 +12,6 @@ import chisel3.util._
 class Accelerator(
     config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature"))))
 ) extends Module {
-
 
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
@@ -42,7 +41,7 @@ class Accelerator(
     )
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
-  val bank = withReset(recordReset) { Module(new ParserBank(config)) }
+  val execution = withReset(recordReset) { Module(new ExecutionStage(config)) }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -71,27 +70,28 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := bank.io.readEnable
-  buffer.io.readAddress := bank.io.readAddress
-  bank.io.readData := buffer.io.readData
-  bank.io.readValid := buffer.io.readValid
+  buffer.io.readEnable := execution.io.readEnable
+  buffer.io.readAddress := execution.io.readAddress
+  execution.io.readData := buffer.io.readData
+  execution.io.readValid := buffer.io.readValid
 
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
-  bank.io.descriptor <> pda.io.descriptor
+  execution.io.descriptor <> pda.io.descriptor
 
-  // The bank loads each value and sends it raw, as a number or as a string,
-  // depending on the value type of its path.
-  io.out <> bank.io.out
+  // The execution stage loads each value and sends it raw, as a number or as
+  // a string, depending on the value type of its path.
+  io.out <> execution.io.out
 
   val endSeen = RegInit(false.B)
   when(pda.io.endOfRecord) { endSeen := true.B }
 
-  // A closing brace may be parsed before LF arrives. The bank is busy from the
-  // moment it accepts a descriptor until the final byte of that attribute is
-  // actually accepted by the consumer, so output backpressure delays the reset.
+  // A closing brace may be parsed before LF arrives. The execution stage is
+  // busy from the moment it accepts a descriptor until the final byte of that
+  // attribute is actually accepted by the consumer, so output backpressure
+  // delays the reset.
   clearRecord := false.B
-  when(!clearRecord && lineStored && endSeen && !bank.io.busy) {
+  when(!clearRecord && lineStored && endSeen && !execution.io.busy) {
     clearRecord := true.B
   }
   when(clearRecord) {
