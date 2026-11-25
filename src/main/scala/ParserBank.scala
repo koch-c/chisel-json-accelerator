@@ -46,8 +46,8 @@ class ParserBank(config: JsonPathConfig) extends Module {
   val id = io.descriptor.bits.attributeId
   val wanted = laneTypes.map { laneType =>
     config.paths.indices
-      .filter(path => config.valueTypeOf(path) == laneType)
-      .map(path => id === config.attributeIdOf(path).U)
+      .filter(path => config.fields(path).valueType == laneType)
+      .map(path => id === path.U)
       .reduce(_ || _)
   }
   val candidates = VecInit(lanes.indices.map(i => wanted(i) && !laneBusy(i)))

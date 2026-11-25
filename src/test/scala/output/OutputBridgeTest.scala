@@ -36,8 +36,10 @@ class ExecutionHarness(
   buffer.io.writeEnable := io.writeEnable
   buffer.io.writeAddress := io.writeAddress
   buffer.io.writeData := io.writeData
-  buffer.io.readEnable := loader.io.readEnable
-  buffer.io.readAddress := loader.io.readAddress
+  // The loader's read port is Decoupled; this harness has a single reader.
+  buffer.io.readEnable := loader.io.read.valid
+  buffer.io.readAddress := loader.io.read.bits
+  loader.io.read.ready := true.B
   loader.io.readData := buffer.io.readData
   loader.io.readValid := buffer.io.readValid
 

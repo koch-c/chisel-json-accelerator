@@ -134,14 +134,14 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "ParserBank"
 
   it should "be idle after reset" in {
-    run(JsonPathConfig(Seq(Seq("a")))) { d =>
+    run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
       d.waitUntilIdle()
       assert(d.output.isEmpty)
     }
   }
 
   it should "send raw attributes in dispatch order with one lane" in {
-    run(JsonPathConfig(Seq(Seq("a")))) { d =>
+    run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
       d.run(Seq(":1" -> 0, ":\"two\"" -> 0, ": 3 " -> 0))
       d.waitUntilIdle()
       assert(d.output.toSeq == bytes(":1:\"two\": 3 "))
@@ -149,26 +149,27 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "route each attribute to the parser of its path" in {
+    // Field 0 is the Int32 and field 1 the string.
     val config = JsonPathConfig(
-      Seq(Seq("id"), Seq("user", "name")),
-      attributeId = 4,
-      valueTypes = Seq(ValueType.Int32, ValueType.String)
+      Seq(
+        FieldSpec(Seq("id"), ValueType.Int32),
+        FieldSpec(Seq("user", "name"), ValueType.String)
+      )
     )
     run(config) { d =>
-      d.run(Seq(": 25" -> 4, ":\"Ada\"" -> 5, ":-7" -> 4, ":\"\"" -> 5))
+      d.run(Seq(": 25" -> 0, ":\"Ada\"" -> 1, ":-7" -> 0, ":\"\"" -> 1))
       d.waitUntilIdle()
       assert(
         d.output.toSeq ==
-          int32Frame(4, 25) ++ stringFrame(5, "Ada") ++
-          int32Frame(4, -7) ++ stringFrame(5, "")
+          int32Frame(0, 25) ++ stringFrame(1, "Ada") ++
+          int32Frame(0, -7) ++ stringFrame(1, "")
       )
     }
   }
 
   it should "keep the order when a later attribute finishes first" in {
     val config = JsonPathConfig(
-      Seq(Seq("v")),
-      valueType = ValueType.String,
+      Seq(FieldSpec(Seq("v"), ValueType.String)),
       parsersPerType = 2
     )
     val long = "the first value is much longer than the second one"
@@ -184,8 +185,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "hold a descriptor back while every lane of its type is in use" in {
     val config = JsonPathConfig(
-      Seq(Seq("v")),
-      valueType = ValueType.Int32,
+      Seq(FieldSpec(Seq("v"), ValueType.Int32)),
       parsersPerType = 2
     )
     run(config) { d =>
@@ -207,7 +207,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "stay busy until the final byte has been accepted" in {
-    run(JsonPathConfig(Seq(Seq("a")))) { d =>
+    run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
       d.allowOutput = false
       d.run(Seq(":12" -> 0))
       for (_ <- 0 until 30) d.tick()
@@ -227,8 +227,7 @@ class ParserBankSpec extends AnyFlatSpec with ChiselScalatestTester {
     def outputWith(lanes: Int): Seq[Int] = {
       var result = Seq.empty[Int]
       val config = JsonPathConfig(
-        Seq(Seq("v")),
-        valueType = ValueType.Number,
+        Seq(FieldSpec(Seq("v"), ValueType.Number)),
         parsersPerType = lanes
       )
       run(config, stall = lanes > 1) { d =>

@@ -292,20 +292,16 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "send a string as a decoded frame and nothing for a missing key" in {
     run(
-      JsonPathConfig(
-        Seq(Seq("name")),
-        attributeId = 5,
-        valueType = ValueType.String
-      )
+      JsonPathConfig(Seq(FieldSpec(Seq("name"), ValueType.String)))
     ) { d =>
-      d.recordBytes("{\"name\": \"Ada\",\"age\":36}\n", stringFrame(5, "Ada"))
+      d.recordBytes("{\"name\": \"Ada\",\"age\":36}\n", stringFrame(0, "Ada"))
       d.recordBytes("{\"age\":36}\n", Seq.empty)
-      d.recordBytes("{\"name\":\"\"  }\n", stringFrame(5, ""))
+      d.recordBytes("{\"name\":\"\"  }\n", stringFrame(0, ""))
     }
   }
 
   it should "decode escapes and keep structural characters in a string" in {
-    run(JsonPathConfig(Seq(Seq("name")), valueType = ValueType.String)) { d =>
+    run(JsonPathConfig(Seq(FieldSpec(Seq("name"), ValueType.String)))) { d =>
       d.recordBytes(
         "{\"name\" : \"a\\\"b,}:\\n\\\\ \\/\" }\n",
         stringFrame(0, "a\"b,}:\n\\ /")
@@ -321,8 +317,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "decode a string selected by a nested path" in {
     run(
       JsonPathConfig(
-        Seq(Seq("device", "location", "city")),
-        valueType = ValueType.String
+        Seq(FieldSpec(Seq("device", "location", "city"), ValueType.String))
       )
     ) { d =>
       d.recordBytes(
@@ -334,7 +329,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "send one string frame per match under output backpressure" in {
     run(
-      JsonPathConfig(Seq(Seq("v")), valueType = ValueType.String),
+      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.String))),
       stall = true
     ) { d =>
       d.recordBytes(
@@ -347,7 +342,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "flag a value that is not a string" in {
-    run(JsonPathConfig(Seq(Seq("v")), valueType = ValueType.String)) { d =>
+    run(JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.String)))) { d =>
       d.recordBytes("{\"v\": 21}\n", stringFrame(0, "", flags = 1))
       d.recordBytes("{\"v\":null}\n", stringFrame(0, "", flags = 1))
       d.recordBytes("{\"v\":\"hot\"}\n", stringFrame(0, "hot"))
@@ -355,20 +350,23 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "give each path its own value type and attribute id" in {
+    // Field 0 is the Int32 and field 1 the string. A number frame starts with
+    // a reserved 0x00 byte, a string frame with its attribute id.
     val config = JsonPathConfig(
-      Seq(Seq("id"), Seq("user", "name")),
-      attributeId = 4,
-      valueTypes = Seq(ValueType.Int32, ValueType.String)
+      Seq(
+        FieldSpec(Seq("id"), ValueType.Int32),
+        FieldSpec(Seq("user", "name"), ValueType.String)
+      )
     )
     run(config) { d =>
       d.recordBytes(
         "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
-        Seq(4, 0, 7, 0, 0, 0) ++ stringFrame(5, "bob")
+        Seq(0, 0, 7, 0, 0, 0) ++ stringFrame(1, "bob")
       )
       // Document order, not config order.
       d.recordBytes(
         "{\"user\":{\"name\":\"Ada\"},\"id\":-2}\n",
-        stringFrame(5, "Ada") ++ Seq(4, 1, 0xfe, 0xff, 0xff, 0xff)
+        stringFrame(1, "Ada") ++ Seq(0, 1, 0xfe, 0xff, 0xff, 0xff)
       )
       d.recordBytes("{\"other\":1}\n", Seq.empty)
     }
@@ -376,8 +374,7 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "keep document order with several parsers per type" in {
     val config = JsonPathConfig(
-      Seq(Seq("v")),
-      valueType = ValueType.String,
+      Seq(FieldSpec(Seq("v"), ValueType.String)),
       parsersPerType = 2
     )
     val long = "a first value that takes much longer to send than the next"
@@ -410,8 +407,10 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     def outputWith(parsers: Int): Seq[Int] = {
       var result = Seq.empty[Int]
       val config = JsonPathConfig(
-        Seq(Seq("n"), Seq("s")),
-        valueTypes = Seq(ValueType.Number, ValueType.String),
+        Seq(
+          FieldSpec(Seq("n"), ValueType.Number),
+          FieldSpec(Seq("s"), ValueType.String)
+        ),
         parsersPerType = parsers
       )
       run(config, stall = parsers > 1) { d =>
