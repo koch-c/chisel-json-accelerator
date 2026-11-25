@@ -15,6 +15,21 @@ class AttributeByte extends Bundle {
   val last = Bool()
 }
 
+// Attribute word is whole word alongside some metadata.
+//     - data:        the whole word, lane 0 in bits 7:0
+//     - attributeId: same meaning as in AttributeByte
+//     - firstByte:   lane of the first byte that belongs to the attribute
+//     - lastByte:    lane of the last byte that belongs to the attribute
+//     - last:        this is the final word of the attribute
+
+class AttributeWord extends Bundle {
+  val data = UInt(64.W)
+  val attributeId = UInt(8.W)
+  val firstByte = UInt(3.W)
+  val lastByte = UInt(3.W)
+  val last = Bool()
+}
+
 /** Fetches one attribute at a time from a 512 x 64-bit InputBuffer. Byte offset
   * 0 is bits 7:0. Memory responses arrive one cycle after the request is
   * accepted. Descriptors must have a nonzero length and stay within the
