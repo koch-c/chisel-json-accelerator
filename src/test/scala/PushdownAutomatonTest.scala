@@ -61,10 +61,8 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
     TestSymbol(SymbolKind.Key, addr, config.keyIds(name))
 
   "PushdownAutomaton" should "send a loader descriptor for the requested nested path" in {
-    val config = JsonPathConfig(
-      Seq(Seq("device", "location", "latitude")),
-      attributeId = 7
-    )
+    val config =
+      JsonPathConfig(Seq(FieldSpec(Seq("device", "location", "latitude"))))
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -85,13 +83,14 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.found.expect(true.B)
       c.io.done.expect(true.B)
       c.io.depth.expect(0.U)
-      assert(descriptors == Seq(Result(7, 33, 5)))
+      assert(descriptors == Seq(Result(0, 33, 5)))
       assert(endOfRecords == 1)
     }
   }
 
   it should "ignore a key symbol outside the requested nesting context" in {
-    val config = JsonPathConfig(Seq(Seq("device", "location", "latitude")))
+    val config =
+      JsonPathConfig(Seq(FieldSpec(Seq("device", "location", "latitude"))))
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -110,10 +109,9 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "match alternative paths that share a root, like $.(id | user.name)" in {
+  it should "distinguish full paths that end in the same key in encounter order" in {
     val config = JsonPathConfig(
-      paths = Seq(Seq("id"), Seq("user", "name")),
-      attributeId = 4
+      Seq(FieldSpec(Seq("user", "id")), FieldSpec(Seq("id")))
     )
     test(new PushdownAutomaton(config)) { c =>
       val symbols = Seq(
@@ -124,7 +122,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
         key(config, "user", 16),
         TestSymbol(SymbolKind.Colon, 17),
         TestSymbol(SymbolKind.ObjOpen, 18),
-        key(config, "name", 26),
+        key(config, "id", 26),
         TestSymbol(SymbolKind.Colon, 27),
         TestSymbol(SymbolKind.ObjClose, 31),
         TestSymbol(SymbolKind.ObjClose, 32)
@@ -133,13 +131,15 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
       val (descriptors, endOfRecords) = send(c, symbols, config)
       c.io.found.expect(true.B)
       c.io.done.expect(true.B)
-      assert(descriptors == Seq(Result(4, 6, 3), Result(5, 27, 4)))
+      assert(descriptors == Seq(Result(1, 6, 3), Result(0, 27, 4)))
       assert(endOfRecords == 1)
     }
   }
 
   it should "hold the loader descriptor stable while the loader is stalled" in {
-    val config = JsonPathConfig(Seq(Seq("temperature")), attributeId = 3)
+    val config = JsonPathConfig(
+      Seq(FieldSpec(Seq("other")), FieldSpec(Seq("temperature")))
+    )
     test(new PushdownAutomaton(config)) { c =>
       c.io.descriptor.ready.poke(false.B)
       val symbols = Seq(
@@ -165,12 +165,13 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.io.in.bits.entries(lane).addr.poke(symbol.address.U)
       }
       c.io.descriptor.valid.expect(true.B)
-      c.io.descriptor.bits.attributeId.expect(3.U)
+      c.io.descriptor.bits.attributeId.expect(1.U)
       c.io.descriptor.bits.startAddress.expect(14.U)
       c.io.descriptor.bits.length.expect(3.U)
       c.io.in.ready.expect(false.B)
       for (_ <- 0 until 3) {
         c.io.descriptor.valid.expect(true.B)
+        c.io.descriptor.bits.attributeId.expect(1.U)
         c.io.descriptor.bits.startAddress.expect(14.U)
         c.io.descriptor.bits.length.expect(3.U)
         c.clock.step()
@@ -182,10 +183,8 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "connect directly to the two-symbol ChannelFifo output" in {
-    val config = JsonPathConfig(
-      Seq(Seq("device", "location", "latitude")),
-      attributeId = 7
-    )
+    val config =
+      JsonPathConfig(Seq(FieldSpec(Seq("device", "location", "latitude"))))
     test(new PdaFifoHarness(config)) { c =>
       val symbols = Seq(
         TestSymbol(SymbolKind.ObjOpen, 0),
@@ -249,7 +248,7 @@ class PushdownAutomatonSpec extends AnyFlatSpec with ChiselScalatestTester {
         "ChannelFifo did not accept all symbol batches"
       )
       assert(sawEndOfRecord, "PDA did not signal end of record")
-      assert(descriptors.toSeq == Seq(Result(7, 33, 5)))
+      assert(descriptors.toSeq == Seq(Result(0, 33, 5)))
     }
   }
 }

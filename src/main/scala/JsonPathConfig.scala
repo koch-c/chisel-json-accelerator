@@ -20,53 +20,57 @@ object ValueType {
   case object String extends ValueType
 }
 
-/** Configuration for the currently supported, object-key-only JSON paths.
-  *
-  * Path i is delivered as valueTypeOf(i) and its frames carry attributeIdOf(i),
-  * so the host can tell the paths apart.
+final case class FieldSpec(
+    path: Seq[String],
+    valueType: ValueType = ValueType.Raw
+)
+
+/** A filter on a projected field, identified by its full path. */
+final case class FilterSpec(
+    path: Seq[String],
+    op: CompareOp,
+    value: FilterValue
+)
+
+/** Object-key-only query. A field's index is its 8-bit attribute ID. Filters
+  * are configuration only; the accelerator does not apply them yet.
   */
 final case class JsonPathConfig(
-    paths: Seq[Seq[String]],
+    fields: Seq[FieldSpec],
     maxDepth: Int = 8,
-    attributeId: Int = 0,
-    valueType: ValueType = ValueType.Raw,
-    valueTypes: Seq[ValueType] = Seq.empty,
+    filters: Seq[FilterSpec] = Nil,
     parsersPerType: Int = 1
 ) {
-  require(paths.nonEmpty, "paths must contain at least one path")
-  require(
-    paths.forall(_.nonEmpty),
-    "paths must contain at least one object key"
-  )
-  require(paths.flatten.forall(_.nonEmpty), "path keys must not be empty")
-  require(paths.distinct.length == paths.length, "paths must be distinct")
+  require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
+
+  val paths: Seq[Seq[String]] = fields.map(_.path)
   require(
-    valueTypes.isEmpty || valueTypes.length == paths.length,
-    "valueTypes must be empty or have one entry per path"
+    paths.forall(p => p.nonEmpty && p.forall(_.nonEmpty)),
+    "each path must contain nonempty object keys"
   )
+  require(paths.forall(_.size <= maxDepth), "paths must fit within maxDepth")
+  require(paths.distinct.size == paths.size, "duplicate field paths")
   require(
-    attributeId >= 0 && attributeId + paths.length - 1 <= 255,
-    "the attribute ids of all paths must fit in 8 bits"
+    !paths.exists(p => paths.exists(q => q.size > p.size && q.startsWith(p))),
+    "a scalar field cannot be a parent of another field"
+  )
+
+  val attributeIds: Map[Seq[String], Int] = paths.zipWithIndex.toMap
+  require(
+    filters.forall(filter => attributeIds.contains(filter.path)),
+    "filters must reference projected fields"
   )
   require(parsersPerType >= 1, "parsersPerType must be at least one")
 
   /** Distinct keys across all paths, in key-symbol code order. */
-  def keys: Seq[String] = paths.flatten.distinct
+  val keys: Seq[String] = paths.flatten.distinct
 
   /** Stable key-symbol codes expected from the path encoder. */
-  def keyIds: Map[String, Int] = keys.zipWithIndex.toMap
-
-  /** How the value of path i is delivered. */
-  def valueTypeOf(pathIndex: Int): ValueType =
-    if (valueTypes.isEmpty) valueType else valueTypes(pathIndex)
-
-  /** The attribute id in the frames of path i. */
-  def attributeIdOf(pathIndex: Int): Int = attributeId + pathIndex
+  val keyIds: Map[String, Int] = keys.zipWithIndex.toMap
+}
 
   /** The value types in use, each listed once. Parsers are only generated for
     * these.
     */
-  def usedValueTypes: Seq[ValueType] =
-    paths.indices.map(valueTypeOf).distinct
-}
+  val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct

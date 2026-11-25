@@ -20,9 +20,7 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   val projecting =
     Bool() // If we have found a colon and we project we're gonna find the value.
   val colonAddress = UInt(12.W) // The address of the current colon.
-  val attributeId = UInt(
-    8.W
-  ) // The id of the path whose value is being projected.
+  val attributeId = UInt(8.W) // Field whose value is being captured.
   val found = Bool() // If any of the requested keys are found.
   val done = Bool() // Done is set when the outer most } or ] is found.
 }
@@ -54,12 +52,13 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
       }
     }
     val terminals = paths.map { candidate =>
-      candidate.foldLeft(0) { (parent, key) =>
+      val terminal = candidate.foldLeft(0) { (parent, key) =>
         builtEdges
           .find(edge => edge._1 == parent && edge._2 == keyIds(key))
           .get
           ._3
       }
+      terminal -> config.attributeIds(candidate)
     }
     (builtEdges.toSeq, nextState, terminals)
   }
@@ -118,9 +117,10 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     }
     val hasTransition = keyTransitions.foldLeft(false.B)(_ || _)
     val targetState = Mux1H(keyTransitions, edges.map(_._3.U(stateWidth.W)))
-    val isTerminal = terminalStates.toSeq
-      .map(id => current.stack(tosIndex) === id.U(stateWidth.W))
-      .foldLeft(false.B)(_ || _)
+    val terminalMatches = terminalStates.map { case (id, _) =>
+      current.stack(tosIndex) === id.U(stateWidth.W)
+    }
+    val isTerminal = terminalMatches.reduce(_ || _)
 
     // When a valid symbol exists within the entries.
     when(symbolValid) {
@@ -145,8 +145,8 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
             ) // If theres a valid transition we set the top of the stack to targetState.
             // If theres a transition and the the targetState is one of the terminalStates we have found a match.
             when(
-              hasTransition && terminalStates.toSeq
-                .map(id => targetState === id.U(stateWidth.W))
+              hasTransition && terminalStates
+                .map { case (id, _) => targetState === id.U(stateWidth.W) }
                 .foldLeft(false.B)(_ || _)
             ) {
               next.found := true.B
@@ -158,13 +158,9 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
           when(isTerminal) {
             next.projecting := true.B
             next.colonAddress := symbol.addr
-            // The terminal state on top of the stack tells which path matched.
-            next.attributeId := MuxLookup(current.stack(tosIndex), 0.U(8.W))(
-              terminalStates.zipWithIndex.map { case (terminal, pathIndex) =>
-                terminal.U(stateWidth.W) -> config
-                  .attributeIdOf(pathIndex)
-                  .U(8.W)
-              }
+            next.attributeId := Mux1H(
+              terminalMatches,
+              terminalStates.map(_._2.U(8.W))
             )
           }
         }
@@ -228,7 +224,8 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
   io.descriptor.bits.attributeId := Mux(
     pendingDescriptor,
     pendingDescriptorBits.attributeId,
-    firstId
+    // Each lane finishes the capture held in its input state.
+    Mux(project0, state.attributeId, after0.attributeId)
   )
   io.descriptor.bits.startAddress := Mux(
     pendingDescriptor,
@@ -248,7 +245,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
     state := after1
     when(hasSecondProject) {
       pendingDescriptor := true.B
-      pendingDescriptorBits.attributeId := id1
+      pendingDescriptorBits.attributeId := after0.attributeId
       pendingDescriptorBits.startAddress := address1
       pendingDescriptorBits.length := length1
     }

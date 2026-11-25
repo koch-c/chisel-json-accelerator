@@ -5,7 +5,7 @@ import chisel3._
   * control. TX adds no framing to the raw output.
   */
 class AcceleratorTop(
-    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature"))),
+    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature")))),
     clockHz: Int = 100000000,
     baudRate: Int = 115200
 ) extends Module {
@@ -28,8 +28,14 @@ object GenerateAcceleratorTop extends App {
   emitVerilog(
     new AcceleratorTop(
       JsonPathConfig(
-        Seq(Seq("sensor", "temperature")),
-        valueType = ValueType.Number
+        fields = Seq(
+          FieldSpec(Seq("id")),
+          FieldSpec(Seq("user", "name")),
+          FieldSpec(Seq("user", "active")),
+          FieldSpec(Seq("user", "profile", "city")),
+          FieldSpec(Seq("sensor", "temperature")),
+          FieldSpec(Seq("sensor", "status"))
+        )
       )
     ),
     Array("--target-dir", "generated")

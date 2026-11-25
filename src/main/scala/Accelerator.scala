@@ -10,8 +10,10 @@ import chisel3.util._
   * acceptance by the consumer, not physical UART completion.
   */
 class Accelerator(
-    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature")))
+    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature"))))
 ) extends Module {
+
+
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
     val out = Decoupled(UInt(8.W))
