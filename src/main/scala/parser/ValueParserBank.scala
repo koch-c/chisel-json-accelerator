@@ -23,7 +23,11 @@ class ValueParserBank(config: JsonPathConfig) extends Module {
   })
   for (i <- 0 until config.channelCount) {
     val unpack = Module(new WordUnpacker)
-    unpack.io.in <> Queue(io.channels(i), 4)
+    val channelQueue = Module(new Queue(new ValueChunk, 4))
+    val unpackStage = Module(new Queue(new ValueChunk, 2))
+    channelQueue.io.enq <> io.channels(i)
+    unpackStage.io.enq <> channelQueue.io.deq
+    unpack.io.in <> unpackStage.io.deq
     if (i < config.numbers) {
       val parser = Module(new NumberParser)
       parser.io.in <> unpack.io.out
