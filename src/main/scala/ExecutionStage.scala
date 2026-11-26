@@ -1,8 +1,8 @@
 import chisel3._
 import chisel3.util._
 
-/** The execution stage (SPEAR-JSON Fig. 2, blocks 3 and 4): one AttributeLoader
-  * that feeds several ParserChannels.
+/** The execution stage consumes tagged words and reorder entries from the
+  * AttributeLoader. Its parser channels are SPEAR-JSON Fig. 2, block 4.
   *
   * For every value type in use there are config.parsersPerType channels. The
   * loader deals the attributes of a type to its channels in rotation.
@@ -21,36 +21,22 @@ import chisel3.util._
 class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
     extends Module {
   val io = IO(new Bundle {
-    val descriptor = Flipped(Decoupled(new AttributeDescriptor))
-    val endOfRecord = Input(Bool()) // the PDA's end-of-record pulse
+    val channels =
+      Flipped(Vec(config.channelTypes.length, Decoupled(new AttributeWord)))
+    val reorder = Flipped(Decoupled(new ReorderEntry))
     val out = Decoupled(UInt(8.W))
-    // An attribute is still being loaded or sent, or an end of record has not
-    // passed through the reorder FIFO yet.
-    val busy = Output(Bool())
-
-    // Read port of the InputBuffer.
-    val readEnable = Output(Bool())
-    val readAddress = Output(UInt(9.W))
-    val readData = Input(UInt(64.W))
-    val readValid = Input(Bool())
+    val recordDrained = Output(Bool()) // pulses when the end marker is popped
   })
 
   private val perType = config.parsersPerType
 
-  val loader = Module(new AttributeLoader(config))
   val channels = config.channelTypes.map(t => Module(new ParserChannel(t)))
   val reorder = Module(new Queue(new ReorderEntry, reorderDepth))
 
-  loader.io.descriptor <> io.descriptor
-  loader.io.endOfRecord := io.endOfRecord
-  io.readEnable := loader.io.readEnable
-  io.readAddress := loader.io.readAddress
-  loader.io.readData := io.readData
-  loader.io.readValid := io.readValid
   for ((channel, i) <- channels.zipWithIndex) {
-    channel.io.in <> loader.io.channels(i)
+    channel.io.in <> io.channels(i)
   }
-  reorder.io.enq <> loader.io.reorder
+  reorder.io.enq <> io.reorder
 
   // ---- Output in document order -----------------------------------------
   // The same rotation as in the loader: one pointer per value type.
@@ -61,8 +47,7 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
   )
   val headId = reorder.io.deq.bits.attributeId
   val headValid = reorder.io.deq.valid
-  // An end-of-record entry belongs to no channel. Nothing reads it here yet,
-  // so it is taken out as soon as it reaches the head.
+  // An end marker belongs to no channel. Pop it as soon as it reaches the head.
   val headIsEnd = headValid && reorder.io.deq.bits.endOfRecord
   val isType = config.usedValueTypes.map { valueType =>
     config.fields.zipWithIndex
@@ -99,8 +84,5 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
     }
   }
 
-  // A descriptor and an end of record count from the cycle they are offered,
-  // so there is no gap before their reorder entries show up.
-  io.busy := headValid || io.descriptor.valid ||
-    io.endOfRecord || loader.io.endPending
+  io.recordDrained := reorder.io.deq.fire && headIsEnd
 }

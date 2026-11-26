@@ -58,10 +58,9 @@ class AttributeLoader(config: JsonPathConfig) extends Module {
     val reorder = Decoupled(new ReorderEntry)
 
     // The PDA's end-of-record pulse. It never comes before the last descriptor
-    // of its record has been accepted.
+    // of its record has been accepted. The next record does not start until
+    // the current record has drained.
     val endOfRecord = Input(Bool())
-    // An end of record has been signaled but its reorder entry is not written.
-    val endPending = Output(Bool())
 
     // Read port of the InputBuffer. The loader is its only user.
     val readEnable = Output(Bool())
@@ -98,18 +97,21 @@ class AttributeLoader(config: JsonPathConfig) extends Module {
   )
 
   // The end-of-record pulse cannot be stalled, so it is remembered here until
-  // its entry fits in the reorder FIFO. No descriptor is accepted in the
-  // meantime, so the entry always comes before those of the next record.
+  // its entry fits in the reorder FIFO. The caller must not offer a descriptor
+  // for the next record while the marker is pending.
   val endPending = RegInit(false.B)
   when(endPending && io.reorder.ready) { endPending := false.B }
   when(io.endOfRecord) { endPending := true.B }
-  io.endPending := endPending
+  assert(
+    !endPending || !io.descriptor.valid,
+    "A descriptor was offered while an end-of-record marker was pending"
+  )
 
   // The reorder entry of an attribute is written in the cycle its descriptor
   // is accepted, so one must fit.
-  io.descriptor.ready := state === idle && io.reorder.ready && !endPending
+  io.descriptor.ready := state === idle && io.reorder.ready
   io.reorder.valid := endPending || (state === idle && io.descriptor.valid)
-  io.reorder.bits.attributeId := id // not used by an end-of-record entry
+  io.reorder.bits.attributeId := Mux(endPending, 0.U, id)
   io.reorder.bits.endOfRecord := endPending
 
   io.readEnable := state === request

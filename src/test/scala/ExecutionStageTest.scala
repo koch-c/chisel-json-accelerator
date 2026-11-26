@@ -3,7 +3,7 @@ import chisel3.util._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** An ExecutionStage with the InputBuffer it reads from. */
+/** ExecutionStage fed by an AttributeLoader and InputBuffer. */
 class ExecutionStageHarness(config: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
     val writeEnable = Input(Bool())
@@ -12,21 +12,24 @@ class ExecutionStageHarness(config: JsonPathConfig) extends Module {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val endOfRecord = Input(Bool())
     val out = Decoupled(UInt(8.W))
-    val busy = Output(Bool())
+    val recordDrained = Output(Bool())
   })
   val buffer = Module(new InputBuffer)
+  val loader = Module(new AttributeLoader(config))
   val stage = Module(new ExecutionStage(config))
   buffer.io.writeEnable := io.writeEnable
   buffer.io.writeAddress := io.writeAddress
   buffer.io.writeData := io.writeData
-  buffer.io.readEnable := stage.io.readEnable
-  buffer.io.readAddress := stage.io.readAddress
-  stage.io.readData := buffer.io.readData
-  stage.io.readValid := buffer.io.readValid
-  stage.io.descriptor <> io.descriptor
-  stage.io.endOfRecord := io.endOfRecord
+  buffer.io.readEnable := loader.io.readEnable
+  buffer.io.readAddress := loader.io.readAddress
+  loader.io.readData := buffer.io.readData
+  loader.io.readValid := buffer.io.readValid
+  loader.io.descriptor <> io.descriptor
+  loader.io.endOfRecord := io.endOfRecord
+  stage.io.channels <> loader.io.channels
+  stage.io.reorder <> loader.io.reorder
   io.out <> stage.io.out
-  io.busy := stage.io.busy
+  io.recordDrained := stage.io.recordDrained
 }
 
 class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
@@ -38,6 +41,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   private class Driver(c: ExecutionStageHarness, stall: Boolean) {
     val output = scala.collection.mutable.ArrayBuffer.empty[Int]
     var allowOutput = true
+    var drainedRecords = 0
     private var cycles = 0
 
     c.io.writeEnable.poke(false.B)
@@ -51,6 +55,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       if (ready && c.io.out.valid.peek().litToBoolean) {
         output += c.io.out.bits.peek().litValue.toInt
       }
+      if (c.io.recordDrained.peek().litToBoolean) drainedRecords += 1
       c.clock.step()
       cycles += 1
     }
@@ -115,14 +120,23 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
     }
 
-    def waitUntilIdle(): Unit = {
+    def waitForDrain(expected: Int): Unit = {
       var waited = 0
-      while (c.io.busy.peek().litToBoolean && waited < 5000) {
+      while (drainedRecords < expected && waited < 5000) {
         tick()
         waited += 1
       }
-      assert(waited < 5000, "The execution stage stayed busy")
       for (_ <- 0 until 4) tick()
+      assert(
+        drainedRecords == expected,
+        "Unexpected number of record-drained pulses"
+      )
+    }
+
+    def finishRecord(): Unit = {
+      val expected = drainedRecords + 1
+      endOfRecord()
+      waitForDrain(expected)
     }
   }
 
@@ -145,7 +159,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "be idle after reset" in {
     run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
-      d.waitUntilIdle()
+      d.waitForDrain(0)
       assert(d.output.isEmpty)
     }
   }
@@ -153,7 +167,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "send raw attributes in dispatch order with one channel" in {
     run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
       d.run(Seq(":1" -> 0, ":\"two\"" -> 0, ": 3 " -> 0))
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(d.output.toSeq == bytes(":1:\"two\": 3 "))
     }
   }
@@ -168,7 +182,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
     )
     run(config) { d =>
       d.run(Seq(": 25" -> 0, ":\"Ada\"" -> 1, ":-7" -> 0, ":\"\"" -> 1))
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(
         d.output.toSeq ==
           int32Frame(0, 25) ++ stringFrame(1, "Ada") ++
@@ -185,7 +199,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
     val long = "the first value is much longer than the second one"
     run(config, stall = true) { d =>
       d.run(Seq(s":\"$long\"" -> 0, ":\"b\"" -> 0, ":\"c\"" -> 0))
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(
         d.output.toSeq ==
           stringFrame(0, long) ++ stringFrame(0, "b") ++ stringFrame(0, "c")
@@ -206,7 +220,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       for (_ <- 0 until 40) d.tick()
       assert(d.output.isEmpty)
       d.allowOutput = true
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(
         d.output.toSeq ==
           int32Frame(0, 1) ++ int32Frame(0, 2) ++ int32Frame(0, 3)
@@ -242,7 +256,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(d.output.isEmpty)
       d.allowOutput = true
       assert(submit(2))
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(
         d.output.toSeq ==
           int32Frame(0, 1) ++ stringFrame(1, long) ++ int32Frame(0, 2)
@@ -266,7 +280,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(d.output.isEmpty)
       d.allowOutput = true
       for (i <- 16 until 20) assert(d.submit(starts(i), 3, 0))
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(d.output.toSeq == values.flatMap(v => int32Frame(0, v)))
     }
   }
@@ -281,24 +295,27 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       val starts = d.load(attributes)
       // Three records of 3, 0 and 2 attributes, without a reset in between.
       for (i <- 0 until 3) assert(d.submit(starts(i), 3, 0))
-      d.endOfRecord()
-      for (_ <- 0 until 3) d.tick()
-      d.endOfRecord()
+      d.finishRecord()
+      d.finishRecord()
+      assert(d.output.toSeq == (1 to 3).flatMap(v => int32Frame(0, v)))
       for (i <- 3 until 5) assert(d.submit(starts(i), 3, 0))
-      d.endOfRecord()
-      d.waitUntilIdle()
+      d.finishRecord()
       assert(d.output.toSeq == (1 to 5).flatMap(v => int32Frame(0, v)))
     }
   }
 
-  it should "stay busy until the final byte has been accepted" in {
+  it should "signal record drained only after the final byte has been accepted" in {
     run(JsonPathConfig(Seq(FieldSpec(Seq("a"))))) { d =>
-      d.allowOutput = false
       d.run(Seq(":12" -> 0))
-      for (_ <- 0 until 30) d.tick()
-      assert(d.output.isEmpty)
+      d.endOfRecord()
+      for (_ <- 0 until 30 if d.output.size < 2) d.tick()
+      assert(d.output.toSeq == bytes(":1"))
+      d.allowOutput = false
+      for (_ <- 0 until 10) d.tick()
+      assert(d.output.toSeq == bytes(":1"))
+      assert(d.drainedRecords == 0)
       d.allowOutput = true
-      d.waitUntilIdle()
+      d.waitForDrain(1)
       assert(d.output.toSeq == bytes(":12"))
     }
   }
@@ -317,7 +334,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       )
       run(config, stall = channels > 1) { d =>
         d.run(attributes)
-        d.waitUntilIdle()
+        d.finishRecord()
         result = d.output.toSeq
       }
       result

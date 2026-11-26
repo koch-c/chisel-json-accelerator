@@ -195,6 +195,16 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "complete a record without matches only after LF" in {
+    run(raw(Seq("v"))) { d =>
+      d.send("{\"x\": 1}") // Full word; the end marker can drain before LF.
+      for (_ <- 0 until 40) d.tick()
+      assert(d.completions == 0)
+      d.record("\n", "")
+      d.record("{\"v\":2}\n", ":2")
+    }
+  }
+
   it should "wait for the consumer to accept output before asserting done" in {
     run(raw(Seq("v"))) { d =>
       d.allowOutput = false

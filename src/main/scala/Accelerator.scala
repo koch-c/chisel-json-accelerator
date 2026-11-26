@@ -41,6 +41,7 @@ class Accelerator(
     )
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
+  val loader = withReset(recordReset) { Module(new AttributeLoader(config)) }
   val execution = withReset(recordReset) { Module(new ExecutionStage(config)) }
   val buffer = Module(new InputBuffer)
 
@@ -70,35 +71,35 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := execution.io.readEnable
-  buffer.io.readAddress := execution.io.readAddress
-  execution.io.readData := buffer.io.readData
-  execution.io.readValid := buffer.io.readValid
+  buffer.io.readEnable := loader.io.readEnable
+  buffer.io.readAddress := loader.io.readAddress
+  loader.io.readData := buffer.io.readData
+  loader.io.readValid := buffer.io.readValid
 
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
-  execution.io.descriptor <> pda.io.descriptor
-  execution.io.endOfRecord := pda.io.endOfRecord
+  loader.io.descriptor <> pda.io.descriptor
+  loader.io.endOfRecord := pda.io.endOfRecord
+  execution.io.channels <> loader.io.channels
+  execution.io.reorder <> loader.io.reorder
 
   // The execution stage loads each value and sends it raw, as a number or as
   // a string, depending on the value type of its path.
   io.out <> execution.io.out
 
-  val endSeen = RegInit(false.B)
-  when(pda.io.endOfRecord) { endSeen := true.B }
+  // The end marker can drain before LF arrives. Remember it until the full
+  // line is stored; all preceding output bytes have already been accepted.
+  val endDrained = RegInit(false.B)
+  when(execution.io.recordDrained) { endDrained := true.B }
 
-  // A closing brace may be parsed before LF arrives. The execution stage is
-  // busy from the moment it accepts a descriptor until the final byte of that
-  // attribute is actually accepted by the consumer, so output backpressure
-  // delays the reset.
   clearRecord := false.B
-  when(!clearRecord && lineStored && endSeen && !execution.io.busy) {
+  when(!clearRecord && lineStored && endDrained) {
     clearRecord := true.B
   }
   when(clearRecord) {
     inputClosed := false.B
     wordCount := 0.U
     lineStored := false.B
-    endSeen := false.B
+    endDrained := false.B
   }
 }

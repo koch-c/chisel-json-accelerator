@@ -344,7 +344,8 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       for (_ <- 0 until 10) d.tick()
       assert(d.reorder.toSeq == Seq(Some(0)))
       d.reorderReady = true
-      // The first attribute of the next record must come after the entry.
+      d.tick()
+      assert(d.reorder.toSeq == Seq(Some(0), None))
       d.submit(2, 2, 0)
       d.waitForWords(2)
       assert(d.reorder.toSeq == Seq(Some(0), None, Some(0)))
