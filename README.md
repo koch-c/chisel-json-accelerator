@@ -210,8 +210,7 @@ We very quickly designed, synthesized, implemented and ran the first MVP on the 
 {"system":{"board":"Nexys 4 DDR","location":"lab bench","firmware":{"version":"1.2.3","build":20261027},"sensors":[{"name":"humidity","value":60},{"name":"pressure","value":1013},{"temperature":"twenty-five degrees"}],"notes":"UART streaming JSON test with nested objects, an array, and a sufficiently long message to cross many eight-byte blocks"},"enabled":true}     
 ```
 
-Once we had completed the MVP 2 and made it run on the FPGA board, we processed to implement the final version of JAW. 
-<!-- TODO: describe how we first designed the first part followed by the two parsers and filtering logic -->
+Once we had completed the MVP 2 and made it run on the FPGA board, we proceeded to implement the final version of JAW. This version is the one described above and the one used in the SPEAR paper. We started constructing the `extract` modules and kept the original output format that is on matches the original bytes were sent back over UART. Once we had implemented the `extract` module, we implemented the `parse` and `output` modules to complete the design.
 
 # AI and LLM Usage
 We used LLM and coding harnesses to assist us in the development of JAW. We primarily focus on the architecture of JAW and created implementation plans. We then made agents create an implementation of our architecture plan, and we iterated over the generated code many times together with the agent, so the end result was efficient and was an implementation of what we required. When the agent was incapable of delivering, we implemented parts of the chisel code ourselves. We adopted this approach to try and learn the future of chip design, where agents increasingly will write the code for us, and the chip designers must be critic and validate the generated code.
