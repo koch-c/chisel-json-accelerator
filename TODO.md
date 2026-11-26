@@ -1,14 +1,13 @@
 # Project 
-- [ ] Finish filter
-- [ ] Finish parsers
-- [ ] Finish scala wrapper
+- [x] Finish filter
+- [x] Finish parsers
+- [x] Finish scala wrapper
 - [ ] Do DSE (blocked by finishing the implementation)
 - [ ] Implement golden model
 - [ ] Make estimates on throughput
 - [ ] Obtain clever stats of the design such as ressource usage, clock cycle, kind of memory
 - [ ] Go through tests and make sure they are good
 
-WHat is up with AttributeID? How many bits is the `Number` valuetype.
 # Presentation
 
 - What is the biggest remaining uncertainty in our project?
