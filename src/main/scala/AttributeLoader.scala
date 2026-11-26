@@ -37,18 +37,17 @@ class AttributeWord extends Bundle {
   * record, one end-of-record entry follows the entries of that record's
   * attributes.
   *
-  * Channels are laid out as config.channelTypes. Attributes of one value type
-  * are dealt to the channels of that type in rotation.
+  * Numeric channels come first, then string channels. Each pool rotates
+  * independently; Int32 and Int64 share the numeric pool.
   *
   * Descriptors must have a nonzero length and stay within the 4096-byte buffer.
   * The memory contents they point at must stay unchanged until the attribute's
   * last word has been sent.
   */
 class AttributeLoader(config: JsonPathConfig) extends Module {
-  private val channelTypes = config.channelTypes
   val io = IO(new Bundle {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
-    val channels = Vec(channelTypes.length, Decoupled(new AttributeWord))
+    val channels = Vec(config.channelCount, Decoupled(new AttributeWord))
     val reorder = Decoupled(new DispatchEntry(config))
 
     // The PDA's end-of-record pulse. It never comes before the last descriptor
@@ -67,7 +66,7 @@ class AttributeLoader(config: JsonPathConfig) extends Module {
   val state = RegInit(idle)
   val address = Reg(UInt(12.W)) // of the next attribute byte to send
   val remaining = Reg(UInt(13.W)) // attribute bytes not sent yet
-  val channel = Reg(UInt(log2Ceil(channelTypes.length max 2).W))
+  val channel = Reg(UInt(log2Ceil(config.channelCount max 2).W))
   val word = Reg(UInt(64.W))
 
   val id = io.descriptor.bits.attributeId

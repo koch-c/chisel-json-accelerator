@@ -79,8 +79,10 @@ final case class JsonPathConfig(
     if (fields.exists(_.valueType != ValueType.String)) numericParsers else 0
   val strings =
     if (usedValueTypes.contains(ValueType.String)) stringParsers else 0
-  val channelTypes =
-    Seq.fill(numbers)(ValueType.Int64) ++ Seq.fill(strings)(ValueType.String)
+
+  /** Channels are numbered with the numeric pool first, then the string pool.
+    */
+  val channelCount: Int = numbers + strings
   val sizes = fields.map(f =>
     if (f.valueType == ValueType.String) f.stringBytes + 2
     else if (f.valueType == ValueType.Int64) 8

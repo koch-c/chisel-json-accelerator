@@ -2,7 +2,7 @@ import chisel3._
 import chisel3.util._
 
 class DispatchEntry(config: JsonPathConfig) extends ReorderEntry {
-  val channel = UInt(log2Ceil(config.channelTypes.size max 2).W)
+  val channel = UInt(log2Ceil(config.channelCount max 2).W)
 }
 
 class TextBeat extends Bundle {
@@ -14,11 +14,11 @@ class TextBeat extends Bundle {
 class ValueParserBank(config: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
     val channels =
-      Flipped(Vec(config.channelTypes.size, Decoupled(new AttributeWord)))
+      Flipped(Vec(config.channelCount, Decoupled(new AttributeWord)))
     val numbers = Vec(config.numbers, Decoupled(new ParsedNumber))
     val strings = Vec(config.strings, Decoupled(new TextBeat))
   })
-  for (i <- config.channelTypes.indices) {
+  for (i <- 0 until config.channelCount) {
     val unpack = Module(new WordUnpacker)
     unpack.io.in <> Queue(io.channels(i), 4)
     if (i < config.numbers) {

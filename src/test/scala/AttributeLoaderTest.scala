@@ -11,7 +11,7 @@ class AttributeLoaderHarness(config: JsonPathConfig) extends Module {
     val writeData = Input(UInt(64.W))
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val channels =
-      Vec(config.channelTypes.length, Decoupled(new AttributeWord))
+      Vec(config.channelCount, Decoupled(new AttributeWord))
     val reorder = Decoupled(new DispatchEntry(config))
     val endOfRecord = Input(Bool())
   })
@@ -170,7 +170,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   private def run(config: JsonPathConfig)(body: Driver => Unit): Unit =
     test(new AttributeLoaderHarness(config)) { c =>
-      body(new Driver(c, config.channelTypes.length))
+      body(new Driver(c, config.channelCount))
     }
 
   private val raw = JsonPathConfig(Seq(FieldSpec(Seq("a"))))
