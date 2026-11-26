@@ -103,25 +103,43 @@ flowchart LR
 <!-- TODO: Document the NumberParser and NumberSerializer output path. -->
 
 ### Parameterization
-Our hardware generator takes a `JsonPathConfig` with these parameters:
+Our hardware generator takes a `JsonPathConfig`. This is where we tell JAW which fields to extract, how to represent them, and which records to keep. The configuration is compiled into the generated hardware. JAW supports paths made up of object keys: for example, we write `$.user.name` as `Seq("user", "name")`.
 
 | Parameter | Explanation |
 |---|---|
-| `paths` | The `JSONPath` query the generated hardware matches. |
-| `maxDepth` | Maximum JSON nesting the matcher tracks, including the root (default: 8). |
-| `attributeId` | **WTF is this. We should remove this.** First byte of every numeric frame; shared by all paths. Not sent in `Raw` mode. |
-| `valueType` | One output format for all paths: `Raw`, `Number`, `Int32`, or `Int64`. |
+| `fields` | The 1 to 256 fields we want to extract, in output order. Each `FieldSpec` has a path and a type: `Int32` (the default), `Int64`, or `String`. For strings, `stringBytes` sets the capacity in bytes (default: 32). |
+| `maxDepth` | The maximum object-key path depth (default: 8). |
+| `filters` | Optional predicates on fields we extract. A record is kept only if all predicates pass. Integers support `==`, `<`, `<=`, `>`, and `>=`, while strings support exact equality. A missing or invalid field fails any predicate that uses it. |
+| `numericParsers`, `stringParsers` | How many parsers of each kind can work in parallel (default: one each). We only generate parsers for the kinds of fields we extract. |
 
-| `valueType` | Explanation |
-|---|---|
-| `Raw` | Original matched bytes, starting with the colon. |
-| `Number` | Decimal number as a sign, magnitude, and base-10 exponent, e.g. negative `125 × 10⁻¹` for `-12.5`. |
-| `Int32` | Signed 32-bit integer. |
-| `Int64` | Signed 64-bit integer. |
+For example, suppose we want to extract `id` and `user.name`, and only keep records whose `id` is exactly `42`. We configure JAW like this:
 
-JAW currently supports rooted object-key paths such as `$.user.name` and unions of explicit paths such as `$.(id | user.name)`, configured as `Seq(Seq("id"), Seq("user", "name"))`. Matches are emitted in input order. 
+```scala
+val config = JsonPathConfig(
+  fields = Seq(
+    FieldSpec(Seq("id"), ValueType.Int64),
+    FieldSpec(Seq("user", "name"), ValueType.String, stringBytes = 32)
+  ),
+  filters = Seq(
+    FilterSpec(Seq("id"), CompareOp.Eq, IntLit(BigInt(42)))
+  )
+)
+```
 
-<!-- TODO, extend this section once code has been updated -->
+JAW returns binary bytes, not JSON or text. We read the first byte to find out what comes next: `00` means the record was rejected and the response is finished. `01` means the record was kept and the fixed-size record follows.
+
+For example, if we send `{"user":{"name":"Ada"},"id":42}` followed by a newline, JAW sends the following bytes. The `|` marks separate parts of the response; they are not sent over UART.
+
+```text
+01 | 05 | 2a 00 00 00 00 00 00 00 | 03 00 41 64 61 [29 zero bytes]
+```
+
+- **`01` - kept.** The `id == 42` filter passed.
+- **`05` - field status.** Each field gets two bits, and `01` means the field is valid. `id` uses the lowest two bits and `user.name` uses the next two. With both fields valid, we get `0000 0101`, or `05` in hex.
+- **`2a 00 00 00 00 00 00 00` - ID.** `2a` is 42 in hex. The ID takes eight bytes, and we send the least significant byte first (little-endian).
+- **`03 00 41 64 61` followed by 29 zero bytes - name.** `03 00` is the two-byte little-endian length of the string actually found. The next three bytes spell `Ada`. We fill the rest of the 32-byte string capacity with zeros.
+
+We get `id` before `user.name` because JAW sends the fields in configuration order, not in the order they appear in the JSON. Every kept response for this configuration is **44 bytes**: 1 outcome byte + 1 status byte + 8 ID bytes + 2 length bytes + 32 string bytes. There is no trailing newline. If we change the input to `"id":43`, JAW sends just `00`, because `id` does not pass the specified filter.
 
 ### Top Level Modules
 All the modules except the `UartTx/Rx` modules are wired together in the `Accelerator` module. The `AcceleratorTop` module wires the `Accelerator` module together with `UartTx/Rx`. The bulk of the integration test for the accelerator are written for the `Accelerator` module, while the test written for `AcceleratorTop` mostly test the Uart support. We have split up the modules like this, because it is slow to simulate Uart, and by isolating the Uart support to a different module, we can efficiently test the accelerator without interacting with Uart and without introducing unnecessary wires. 
