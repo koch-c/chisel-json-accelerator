@@ -32,10 +32,15 @@ The overall architecture and flow of bits is shown in the mermaid diagram below:
 ---
 config:
   layout: elk
+  theme: base
+  themeVariables:
+    lineColor: '#64748b'
+    textColor: '#0f172a'
+    edgeLabelBackground: '#f8fafc'
   elk:
     mergeEdges: true
 ---
-flowchart TD
+flowchart LR
     RX[UartRx]
 
     subgraph CORE[Accelerator]
@@ -68,6 +73,23 @@ flowchart TD
 
     RX --> INPUT
     SERIALIZER -->|Outcome byte and optional record| TX[UartTx]
+
+    style CORE fill:#e2e8f0,stroke:#475569,stroke-width:2px,color:#0f172a
+    style EXTRACT fill:#eff6ff,stroke:#3b82f6,color:#172554
+    style PARSE fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+    style OUTPUT fill:#ecfdf5,stroke:#10b981,color:#022c22
+
+    classDef extractNode fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef memoryNode fill:#bfdbfe,stroke:#1d4ed8,color:#172554
+    classDef parserNode fill:#ede9fe,stroke:#7c3aed,color:#2e1065
+    classDef outputNode fill:#d1fae5,stroke:#059669,color:#022c22
+    classDef uartNode fill:#334155,stroke:#64748b,color:#ffffff
+
+    class INPUT,LEXER,FIFO,PDA,LOADER extractNode
+    class BUFFER memoryNode
+    class UNPACK,NUM,STR parserNode
+    class REORDER,ASSEMBLER,FILTER,SERIALIZER outputNode
+    class RX,TX uartNode
 ```
 
 - `UartRx` receives the JSON bytes from our computer over UART and passes them to the `InputFIFO`.
