@@ -1,7 +1,10 @@
 import chisel3._
 import chisel3.util._
 
-class DispatchEntry(config: JsonPathConfig) extends ReorderEntry {
+/** A matched field and its channel, or an end marker that has no result. */
+class DispatchEntry(config: JsonPathConfig) extends Bundle {
+  val attributeId = UInt(8.W)
+  val endOfRecord = Bool()
   val channel = UInt(log2Ceil(config.channelCount max 2).W)
 }
 
