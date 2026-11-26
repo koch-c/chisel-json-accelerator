@@ -26,7 +26,13 @@ Instead of considering every character of the JSON equally, we use the `path enc
 
 ## Architecture
 
-The overall architecture and flow of bits is shown in the mermaid diagram below:
+`Accelerator` is the core of JAW. It takes in JSON bytes and sends back binary records. We put UART in `AcceleratorTop`, a wrapper around the core, so `Accelerator` doesn't depend on how the bytes get to it. This also lets us test the core directly without simulating UART.
+
+The core has three sections, shown in the diagram below:
+
+- `extract` finds the requested fields and fetches their bytes from the input buffer.
+- `parser` turns those bytes into typed integer and string values.
+- `output` assembles the values in configuration order, applies the filters, and serializes the response.
 
 ```mermaid
 ---
@@ -140,9 +146,6 @@ For example, if we send `{"user":{"name":"Ada"},"id":42}` followed by a newline,
 - **`03 00 41 64 61` followed by 29 zero bytes - name.** `03 00` is the two-byte little-endian length of the string actually found. The next three bytes spell `Ada`. We fill the rest of the 32-byte string capacity with zeros.
 
 We get `id` before `user.name` because JAW sends the fields in configuration order, not in the order they appear in the JSON. Every kept response for this configuration is **44 bytes**: 1 outcome byte + 1 status byte + 8 ID bytes + 2 length bytes + 32 string bytes. There is no trailing newline. If we change the input to `"id":43`, JAW sends just `00`, because `id` does not pass the specified filter.
-
-### Top Level Modules
-All the modules except the `UartTx/Rx` modules are wired together in the `Accelerator` module. The `AcceleratorTop` module wires the `Accelerator` module together with `UartTx/Rx`. The bulk of the integration test for the accelerator are written for the `Accelerator` module, while the test written for `AcceleratorTop` mostly test the Uart support. We have split up the modules like this, because it is slow to simulate Uart, and by isolating the Uart support to a different module, we can efficiently test the accelerator without interacting with Uart and without introducing unnecessary wires. 
 
 ## Agile Development
 We of courses implemented JAW with an Agile mindset. Every Thursday after class we had our weekly standups, where we talked about what tickets we had completed, what was blocking us, and we decided what we wanted to work on for the next spring. We organized ourselves through GitHub Projects in a kanban board
