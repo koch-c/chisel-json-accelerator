@@ -2,41 +2,130 @@
 sealed trait ValueType
 object ValueType {
 
-  /** The raw bytes from the colon up to the next ',' or '}'. */
-  case object Raw extends ValueType
-
-  /** Parsed by NumberParser and sent as decimal parts: mantissa and exp10. */
-  case object Number extends ValueType
-
   /** Parsed by NumberParser and sent as a 32-bit two's complement integer. */
   case object Int32 extends ValueType
 
   /** Parsed by NumberParser and sent as a 64-bit two's complement integer. */
   case object Int64 extends ValueType
+
+  /** Decoded by StringParser and sent without quotes, followed by 0x00 and a
+    * flags byte.
+    */
+  case object String extends ValueType
 }
 
-/** Configuration for the currently supported, object-key-only JSON paths. */
+final case class FieldSpec(
+    path: Seq[String],
+    valueType: ValueType = ValueType.Int32,
+    stringBytes: Int = 32
+)
+
+sealed trait CompareOp
+object CompareOp {
+  case object Eq extends CompareOp
+  case object Lt extends CompareOp
+  case object Le extends CompareOp
+  case object Gt extends CompareOp
+  case object Ge extends CompareOp
+}
+
+sealed trait FilterValue
+final case class IntLit(value: BigInt) extends FilterValue
+final case class StrLit(value: String) extends FilterValue
+
+/** A filter on a projected field, identified by its full path. */
+final case class FilterSpec(
+    path: Seq[String],
+    op: CompareOp,
+    value: FilterValue
+)
+
+/** Object-key-only query. A field's index is its 8-bit attribute ID. */
 final case class JsonPathConfig(
-    paths: Seq[Seq[String]],
+    fields: Seq[FieldSpec],
     maxDepth: Int = 8,
-    attributeId: Int = 0,
-    valueType: ValueType = ValueType.Raw
+    filters: Seq[FilterSpec] = Nil,
+    numericParsers: Int = 1,
+    stringParsers: Int = 1
 ) {
-  require(paths.nonEmpty, "paths must contain at least one path")
-  require(
-    paths.forall(_.nonEmpty),
-    "paths must contain at least one object key"
-  )
-  require(paths.flatten.forall(_.nonEmpty), "path keys must not be empty")
+  require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
+
+  val paths: Seq[Seq[String]] = fields.map(_.path)
   require(
-    attributeId >= 0 && attributeId <= 255,
-    "attributeId must fit in 8 bits"
+    paths.forall(p => p.nonEmpty && p.forall(_.nonEmpty)),
+    "each path must contain nonempty object keys"
+  )
+  require(paths.forall(_.size <= maxDepth), "paths must fit within maxDepth")
+  require(paths.distinct.size == paths.size, "duplicate field paths")
+  require(
+    !paths.exists(p => paths.exists(q => q.size > p.size && q.startsWith(p))),
+    "a scalar field cannot be a parent of another field"
+  )
+
+  val attributeIds: Map[Seq[String], Int] = paths.zipWithIndex.toMap
+  val resolvedFilters: Seq[(Int, FilterSpec)] = filters.map { filter =>
+    require(
+      attributeIds.contains(filter.path),
+      "filters must reference projected fields"
+    )
+    val id = attributeIds(filter.path)
+    val field = fields(id)
+    (field.valueType, filter.value) match {
+      case (ValueType.String, StrLit(text)) =>
+        require(filter.op == CompareOp.Eq, "strings only support equality")
+        require(
+          text
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            .length <= field.stringBytes,
+          "string filter constant exceeds field capacity"
+        )
+      case (ValueType.Int32 | ValueType.Int64, IntLit(value)) =>
+        val width = if (field.valueType == ValueType.Int32) 32 else 64
+        val limit = BigInt(1) << (width - 1)
+        require(
+          value >= -limit && value < limit,
+          "integer filter constant does not fit field"
+        )
+      case _ =>
+        throw new IllegalArgumentException(
+          "filter constant must match the field type"
+        )
+    }
+    id -> filter
+  }
+  require(numericParsers >= 1 && stringParsers >= 1)
+  require(
+    fields.forall(f =>
+      f.valueType != ValueType.String || (f.stringBytes > 0 && f.stringBytes <= 65535)
+    )
   )
 
   /** Distinct keys across all paths, in key-symbol code order. */
-  def keys: Seq[String] = paths.flatten.distinct
+  val keys: Seq[String] = paths.flatten.distinct
 
   /** Stable key-symbol codes expected from the path encoder. */
-  def keyIds: Map[String, Int] = keys.zipWithIndex.toMap
+  val keyIds: Map[String, Int] = keys.zipWithIndex.toMap
+
+  /** The value types in use, each listed once. Parsers are only generated for
+    * these.
+    */
+  val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct
+
+  val numbers =
+    if (fields.exists(_.valueType != ValueType.String)) numericParsers else 0
+  val strings =
+    if (usedValueTypes.contains(ValueType.String)) stringParsers else 0
+
+  /** Channels are numbered with the numeric pool first, then the string pool.
+    */
+  val channelCount: Int = numbers + strings
+  val sizes = fields.map(f =>
+    if (f.valueType == ValueType.String) f.stringBytes + 2
+    else if (f.valueType == ValueType.Int64) 8
+    else 4
+  )
+  val offsets = sizes.scanLeft(0)(_ + _).init
+  val statusBytes = (fields.size + 3) / 4
+  val recordBytes = statusBytes + sizes.sum
 }

@@ -195,7 +195,6 @@ class ChannelFifoSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.in.bits.count.poke(2.U)
       for (i <- 0 until 2) {
         c.io.in.bits.entries(i).data.poke((40 + i).U)
-        c.io.in.bits.entries(i).attributeId.poke(7.U)
         c.io.in.bits.entries(i).last.poke((i == 1).B)
       }
       c.io.in.ready.expect(true.B)
@@ -206,7 +205,6 @@ class ChannelFifoSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.io.out.valid.expect(true.B)
         c.io.out.bits.count.expect(1.U)
         c.io.out.bits.entries(0).data.expect((40 + i).U)
-        c.io.out.bits.entries(0).attributeId.expect(7.U)
         c.io.out.bits.entries(0).last.expect((i == 1).B)
         c.io.out.ready.poke(true.B)
         c.clock.step()

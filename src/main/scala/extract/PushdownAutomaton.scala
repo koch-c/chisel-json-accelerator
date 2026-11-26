@@ -20,6 +20,7 @@ class PdaState(pathLength: Int, maxDepth: Int) extends Bundle {
   val projecting =
     Bool() // If we have found a colon and we project we're gonna find the value.
   val colonAddress = UInt(12.W) // The address of the current colon.
+  val attributeId = UInt(8.W) // Field whose value is being captured.
   val found = Bool() // If any of the requested keys are found.
   val done = Bool() // Done is set when the outer most } or ] is found.
 }
@@ -52,13 +53,14 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
       }
     }
     val terminals = paths.map { candidate =>
-      candidate.foldLeft(0) { (parent, key) =>
+      val terminal = candidate.foldLeft(0) { (parent, key) =>
         builtEdges
           .find(edge => edge._1 == parent && edge._2 == keyIds(key))
           .get
           ._3
       }
-    }.toSet
+      terminal -> config.attributeIds(candidate)
+    }
     (builtEdges.toSeq, nextState, terminals)
   }
   private val stateWidth = math.max(1, log2Ceil(trieStateCount))
@@ -94,12 +96,13 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
       current: PdaState,
       symbol: JsonSymbol,
       symbolValid: Bool
-  ): (PdaState, Bool, UInt, UInt, Bool) = {
+  ): (PdaState, Bool, UInt, UInt, UInt, Bool) = {
     val next = Wire(new PdaState(trieStateCount - 1, maxDepth))
     next := current
     val project = WireDefault(false.B)
     val projectAddress = WireDefault(0.U(12.W))
     val projectLength = WireDefault(0.U(13.W))
+    val projectId = WireDefault(0.U(8.W))
     val endOfRecord = WireDefault(false.B)
 
     // A key transition is selected from TOS-1 and writes its target into TOS.
@@ -115,9 +118,10 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
     }
     val hasTransition = keyTransitions.foldLeft(false.B)(_ || _)
     val targetState = Mux1H(keyTransitions, edges.map(_._3.U(stateWidth.W)))
-    val isTerminal = terminalStates.toSeq
-      .map(id => current.stack(tosIndex) === id.U(stateWidth.W))
-      .foldLeft(false.B)(_ || _)
+    val terminalMatches = terminalStates.map { case (id, _) =>
+      current.stack(tosIndex) === id.U(stateWidth.W)
+    }
+    val isTerminal = terminalMatches.reduce(_ || _)
 
     // When a valid symbol exists within the entries.
     when(symbolValid) {
@@ -142,8 +146,8 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
             ) // If theres a valid transition we set the top of the stack to targetState.
             // If theres a transition and the the targetState is one of the terminalStates we have found a match.
             when(
-              hasTransition && terminalStates.toSeq
-                .map(id => targetState === id.U(stateWidth.W))
+              hasTransition && terminalStates
+                .map { case (id, _) => targetState === id.U(stateWidth.W) }
                 .foldLeft(false.B)(_ || _)
             ) {
               next.found := true.B
@@ -155,6 +159,10 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
           when(isTerminal) {
             next.projecting := true.B
             next.colonAddress := symbol.addr
+            next.attributeId := Mux1H(
+              terminalMatches,
+              terminalStates.map(_._2.U(8.W))
+            )
           }
         }
         // If the symbol is a comma and we're currently looking in a value, it means we're done looking sp we can set the project flag. And calculate the value size.
@@ -163,6 +171,7 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
             project := true.B
             projectAddress := current.colonAddress
             projectLength := symbol.addr - current.colonAddress
+            projectId := current.attributeId
             next.projecting := false.B
           }
           // If the stackpointer is not 0, we inject a zero in the stack.
@@ -178,6 +187,7 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
             project := true.B
             projectAddress := current.colonAddress
             projectLength := symbol.addr - current.colonAddress
+            projectId := current.attributeId
             next.projecting := false.B
           }
           // If the stackpointer is progressed, we remove one from the stackpointer.
@@ -192,7 +202,7 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
         }
     }
 
-    (next, project, projectAddress, projectLength, endOfRecord)
+    (next, project, projectAddress, projectLength, projectId, endOfRecord)
   }
 
   // Creating transitions for each lane in the dynamic sized processing.
@@ -208,7 +218,7 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
   val stateAfterBatch = stateAfterPrevious
 
   val projectFlags = transitions.map(_._2)
-  val batchEndRecords = transitions.map(_._5).reduce(_ || _)
+  val batchEndRecords = transitions.map(_._6).reduce(_ || _)
 
   val projectCount = PopCount(projectFlags)
 
@@ -217,7 +227,7 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
 
   val descCandidates = transitions.map { result =>
     val descriptor = Wire(new AttributeDescriptor)
-    descriptor.attributeId := config.attributeId.U(8.W)
+    descriptor.attributeId := result._5
     descriptor.startAddress := result._3
     descriptor.length := result._4
     descriptor
@@ -232,7 +242,6 @@ class PushdownAutomaton(config: JsonPathConfig, pdaWidth: Int = 2)
   val batchRespectsRecordBoundary =
     !batchEndRecords || retainedCount === 0.U
   io.in.ready := !pendingEndOfRecord && batchFits && batchRespectsRecordBoundary
-
   when(io.in.fire) {
     state := stateAfterBatch
     pendingEndOfRecord := batchEndRecords && projectCount =/= 0.U

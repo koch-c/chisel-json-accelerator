@@ -2,7 +2,8 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** One serial smoke test; detailed extraction tests use Accelerator directly.
+/** UART smoke tests for fixed-layout records; detailed extraction tests use
+  * Accelerator directly.
   */
 class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
 
@@ -10,8 +11,7 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
     */
   private def exchange(
       config: JsonPathConfig,
-      json: String,
-      expected: Seq[Int]
+      requests: Seq[(String, Seq[Int])]
   ): Unit = {
     val clocksPerBit = 8
     test(new AcceleratorTop(config, clockHz = 80, baudRate = 10)) { c =>
@@ -48,74 +48,38 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.clock.step()
       }
 
-      for (b <- json.getBytes("UTF-8")) {
-        val bits = Seq(false) ++ (0 until 8).map(i =>
-          ((b & 0xff) & (1 << i)) != 0
-        ) ++ Seq(true)
-        for (bit <- bits) {
-          c.io.uartRx.poke(bit.B)
-          for (_ <- 0 until clocksPerBit) tick()
+      // The host waits for the whole response before starting the next line.
+      for ((line, response) <- requests) {
+        received.clear()
+        for (b <- line.getBytes("UTF-8")) {
+          val bits = Seq(false) ++ (0 until 8).map(i =>
+            ((b & 0xff) & (1 << i)) != 0
+          ) ++ Seq(true)
+          for (bit <- bits) {
+            c.io.uartRx.poke(bit.B)
+            for (_ <- 0 until clocksPerBit) tick()
+          }
         }
+        c.io.uartRx.poke(true.B)
+        var waited = 0
+        val timeout = 200 + response.length * 20 * clocksPerBit
+        while (received.length < response.length && waited < timeout) {
+          tick()
+          waited += 1
+        }
+        for (_ <- 0 until 2 * 10 * clocksPerBit) tick()
+        assert(
+          received.toSeq == response,
+          s"Unexpected UART response: ${received.toSeq}"
+        )
       }
-      c.io.uartRx.poke(true.B)
-      var waited = 0
-      val timeout = 200 + expected.length * 20 * clocksPerBit
-      while (received.length < expected.length && waited < timeout) {
-        tick()
-        waited += 1
-      }
-      for (_ <- 0 until 2 * 10 * clocksPerBit) tick()
-      assert(
-        received.toSeq == expected,
-        s"Unexpected UART response: ${received.toSeq}"
-      )
     }
   }
 
   "AcceleratorTop" should "connect UART RX through the core to unmodified UART TX" in {
     exchange(
-      JsonPathConfig(Seq(Seq("v"))),
-      "{\"v\":1}\n",
-      Seq(':'.toInt, '1'.toInt)
-    )
-  }
-
-  it should "send a number frame over UART" in {
-    // -12.5 is mantissa 125 with exp10 -1. Flags: negative and isFloat.
-    exchange(
-      JsonPathConfig(
-        Seq(Seq("v")),
-        attributeId = 7,
-        valueType = ValueType.Number
-      ),
-      "{\"v\":-12.5}\n",
-      Seq(7, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff)
-    )
-  }
-
-  it should "extract every configured path through the whole UART pipeline" in {
-    // RX -> InputFIFO -> Lexer -> ChannelFifo -> PDA -> AttributeLoader -> TX.
-    // The nested "id" and the array must not match; both paths must.
-    exchange(
-      JsonPathConfig(Seq(Seq("id"), Seq("user", "name"))),
-      "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
-      ":7:\"bob\"".map(_.toInt)
-    )
-  }
-
-  it should "extract several disjoint paths in input order, not config order" in {
-    exchange(
-      JsonPathConfig(Seq(Seq("a"), Seq("b", "c"), Seq("d", "e", "f"))),
-      "{\"d\":{\"e\":{\"f\":3}},\"b\":{\"c\":2,\"a\":9},\"a\":1}\n",
-      ":3:2:1".map(_.toInt)
-    )
-  }
-
-  it should "extract a union of keys under a shared prefix, like $.device.(lat | lon)" in {
-    exchange(
-      JsonPathConfig(Seq(Seq("device", "lat"), Seq("device", "lon"))),
-      "{\"lat\":0,\"device\":{\"lon\":2,\"alt\":5,\"lat\":1}}\n",
-      ":2:1".map(_.toInt)
+      JsonPathConfig(Seq(FieldSpec(Seq("v")))),
+      Seq("{\"v\":1}\n" -> Seq(1, 1, 1, 0, 0, 0))
     )
   }
 }

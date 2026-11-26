@@ -1,16 +1,13 @@
 import chisel3._
 import chisel3.util._
 
-/** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
-  * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * contains the exact AttributeLoader bytes, without added framing. done pulses
-  * for one cycle after LF, parsing, and all output transfers finish. It denotes
-  * byte acceptance by the consumer, not physical UART completion.
-  */
+/** Emits an outcome byte and, if kept, a fixed-size record per JSON line. */
 class Accelerator(
-    config: JsonPathConfig = JsonPathConfig(Seq(Seq("temperature"))),
+    config: JsonPathConfig =
+      JsonPathConfig(Seq(FieldSpec(Seq("id")))),
     pdaWidth: Int = 2
 ) extends Module {
+
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
     val out = Decoupled(UInt(8.W))
@@ -41,7 +38,10 @@ class Accelerator(
   val pda = withReset(recordReset) {
     Module(new PushdownAutomaton(config, pdaWidth))
   }
-  val loader = withReset(recordReset) { Module(new AttributeLoader) }
+  val loader = withReset(recordReset) { Module(new AttributeLoader(config)) }
+  val parserBank = withReset(recordReset) {
+    Module(new ValueParserBank(config))
+  }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -78,54 +78,34 @@ class Accelerator(
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
   loader.io.descriptor <> pda.io.descriptor
-
-  // Output stage can choose between the raw output or a parsed number.
-  val lastOut = config.valueType match {
-    case ValueType.Raw =>
-      io.out.valid := loader.io.out.valid
-      io.out.bits := loader.io.out.bits.data
-      loader.io.out.ready := io.out.ready
-      loader.io.out.bits.last
-    case _ =>
-      val parser = withReset(recordReset) { Module(new NumberParser) }
-      val serializer = withReset(recordReset) {
-        Module(new NumberSerializer(config.valueType))
-      }
-      parser.io.in <> loader.io.out
-      serializer.io.in <> parser.io.out
-      io.out <> serializer.io.out
-      serializer.io.last
+  loader.io.endOfRecord := pda.io.endOfRecord
+  parserBank.io.channels <> loader.io.channels
+  val reorder = withReset(recordReset) {
+    Module(new Queue(new ResultOrderEntry(config), 16))
   }
-
-  val endSeen = RegInit(false.B)
-
-  // Attributes that have been handed to the loader but whose output has not
-  // been fully accepted yet. At most three: one each in the loader, the number
-  // parser and the serializer.
-  val pendingAttributes = RegInit(0.U(2.W))
-  val attributeStarted = loader.io.descriptor.fire
-  val attributeFinished = io.out.fire && lastOut
-  val attributeBusy = pendingAttributes =/= 0.U
-
-  when(pda.io.endOfRecord) { endSeen := true.B }
-  when(attributeStarted && !attributeFinished) {
-    pendingAttributes := pendingAttributes + 1.U
+  val assembler = withReset(recordReset) { Module(new RecordAssembler(config)) }
+  val serializer = withReset(recordReset) {
+    Module(new RecordSerializer(config.recordBytes))
   }
-  when(attributeFinished && !attributeStarted) {
-    pendingAttributes := pendingAttributes - 1.U
-  }
-
-  // A closing brace may be parsed before LF arrives. Output backpressure holds
-  // attributeBusy until the final byte is actually accepted by the consumer.
+  reorder.io.enq <> loader.io.reorder
+  assembler.io.reorder <> reorder.io.deq
+  assembler.io.numbers <> parserBank.io.numbers
+  assembler.io.strings <> parserBank.io.strings
+  val filter = Module(new RecordFilter(config))
+  serializer.io.record <> assembler.io.record
+  filter.io.record := assembler.io.record.bits
+  serializer.io.keep := filter.io.keep
+  io.out <> serializer.io.out
+  val endDrained = RegInit(false.B)
+  when(assembler.io.record.fire) { endDrained := true.B }
   clearRecord := false.B
-  when(!clearRecord && lineStored && endSeen && !attributeBusy) {
+  when(!clearRecord && lineStored && endDrained) {
     clearRecord := true.B
   }
   when(clearRecord) {
     inputClosed := false.B
     wordCount := 0.U
     lineStored := false.B
-    endSeen := false.B
-    pendingAttributes := 0.U
+    endDrained := false.B
   }
 }

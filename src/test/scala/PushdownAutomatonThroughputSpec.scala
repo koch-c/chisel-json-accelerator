@@ -46,7 +46,7 @@ class PushdownAutomatonThroughputSpec
   }
 
   private val fieldCount = 64
-  private val config = JsonPathConfig(Seq(Seq("v")))
+  private val config = JsonPathConfig(Seq(FieldSpec(Seq("v"))))
 
   private val symbols = {
     val stream = scala.collection.mutable.ArrayBuffer(

@@ -59,10 +59,10 @@ class AcceleratorBenchmarkSpec extends AnyFlatSpec with ChiselScalatestTester {
       pdaWidth: Int,
       config: JsonPathConfig,
       json: String,
-      expected: String
+      expected: Seq[Int]
   ): Result = {
     val input = json.getBytes("UTF-8").map(_ & 0xff)
-    val expectedOutput = expected.getBytes("UTF-8").map(_ & 0xff).toSeq
+    val expectedOutput = expected
 
     var result: Option[Result] = None
     test(new Accelerator(config, pdaWidth = pdaWidth)) { c =>
@@ -132,23 +132,25 @@ class AcceleratorBenchmarkSpec extends AnyFlatSpec with ChiselScalatestTester {
         benchmark(
           "sparse",
           pdaWidth,
-          JsonPathConfig(Seq(Seq("v"))),
+          JsonPathConfig(Seq(FieldSpec(Seq("v")))),
           sparseJson,
-          ":7"
+          Seq(1, 1, 7, 0, 0, 0)
         ),
         benchmark(
           "dense_repeated_key",
           pdaWidth,
-          JsonPathConfig(Seq(Seq("v"))),
+          JsonPathConfig(Seq(FieldSpec(Seq("v")))),
           "{" + Seq.fill(24)("\"v\":1").mkString(",") + "}\n",
-          Seq.fill(24)(":1").mkString
+          Seq(1, 1, 1, 0, 0, 0)
         ),
         benchmark(
           "multiple_paths",
           pdaWidth,
-          JsonPathConfig(Seq(Seq("id"), Seq("user", "name"))),
+          JsonPathConfig(
+            Seq(FieldSpec(Seq("id")), FieldSpec(Seq("user", "name")))
+          ),
           "{\"id\":7,\"user\":{\"name\":\"bob\"}}\n",
-          ":7:\"bob\""
+          Seq(1, 9, 7, 0, 0, 0, 0, 0, 0, 0)
         )
       )
     }

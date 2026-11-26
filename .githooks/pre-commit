@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+staged=$(mktemp)
+trap 'rm -f -- "$staged"' EXIT
+git diff --cached --name-only --diff-filter=ACMRT -z > "$staged"
+
+files=()
+while IFS= read -r -d '' file; do
+  case "$file" in
+    *.scala|*.sbt) ;;
+    *) continue ;;
+  esac
+  # sbt parses tasks as command strings, so reject paths needing escaping.
+  if [[ ! $file =~ ^[a-zA-Z0-9_./-]+$ ]]; then
+    printf 'pre-commit: cannot safely pass this path to sbt: %q\n' "$file" >&2
+    exit 1
+  fi
+  if [[ ! -f $file || -L $file ]] || ! git --literal-pathspecs diff --quiet -- "$file"; then
+    printf 'pre-commit: %s is not a regular staged file with a clean working copy. Stage or stash unstaged changes first.\n' "$file" >&2
+    exit 1
+  fi
+  files+=("./$file")
+done < "$staged"
+
+if ((${#files[@]} == 0)); then
+  exit 0
+fi
+
+printf -v args ' %s' "${files[@]}"
+sbt "Compile / scalafmtOnly$args"
+
+if ! git --literal-pathspecs diff --quiet -- "${files[@]}"; then
+  printf 'pre-commit: scalafmt changed staged files. Review the changes, stage them, and commit again.\n' >&2
+  git --literal-pathspecs diff --name-only -- "${files[@]}" >&2
+  exit 1
+fi

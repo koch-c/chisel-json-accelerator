@@ -13,3 +13,5 @@ addCompilerPlugin(
 )
 libraryDependencies += "org.chipsalliance" %% "chisel" % chiselVersion
 libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "6.0.0"
+
+Test / unmanagedSources += baseDirectory.value / "fpga" / "FpgaTestCases.scala"
