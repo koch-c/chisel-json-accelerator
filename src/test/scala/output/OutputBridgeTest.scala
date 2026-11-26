@@ -53,6 +53,7 @@ class ExecutionHarness(
 
   unpacker.io.in <> loader.io.channels(0)
   loader.io.reorder.ready := true.B
+  loader.io.endOfRecord := false.B // the ReorderWriter writes the end of record
   router.io.in <> unpacker.io.out
   numberParser.io.in <> router.io.numbers
   numbers.io.in <> numberParser.io.out

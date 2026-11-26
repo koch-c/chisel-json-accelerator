@@ -13,6 +13,7 @@ class AttributeLoaderHarness(config: JsonPathConfig) extends Module {
     val channels =
       Vec(config.channelTypes.length, Decoupled(new AttributeWord))
     val reorder = Decoupled(new ReorderEntry)
+    val endOfRecord = Input(Bool())
   })
 
   val buffer = Module(new InputBuffer)
@@ -29,6 +30,7 @@ class AttributeLoaderHarness(config: JsonPathConfig) extends Module {
   loader.io.descriptor <> io.descriptor
   io.channels <> loader.io.channels
   io.reorder <> loader.io.reorder
+  loader.io.endOfRecord := io.endOfRecord
 }
 
 class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
@@ -45,12 +47,16 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   private class Driver(c: AttributeLoaderHarness, channels: Int) {
     val words = scala.collection.mutable.ArrayBuffer.empty[Word]
-    val reorderIds = scala.collection.mutable.ArrayBuffer.empty[Int]
+    // The reorder entries in the order they were written: the attribute id,
+    // or None for an end-of-record entry.
+    val reorder = scala.collection.mutable.ArrayBuffer.empty[Option[Int]]
+    def reorderIds: Seq[Int] = reorder.flatten.toSeq
     val channelReady = Array.fill(channels)(true)
+    var reorderReady = true
 
     c.io.writeEnable.poke(false.B)
     c.io.descriptor.valid.poke(false.B)
-    c.io.reorder.ready.poke(true.B)
+    c.io.endOfRecord.poke(false.B)
 
     def tick(): Unit = {
       for (i <- 0 until channels) {
@@ -73,8 +79,12 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
           )
         }
       }
-      if (c.io.reorder.valid.peek().litToBoolean) {
-        reorderIds += c.io.reorder.bits.attributeId.peek().litValue.toInt
+      c.io.reorder.ready.poke(reorderReady.B)
+      if (reorderReady && c.io.reorder.valid.peek().litToBoolean) {
+        reorder += (
+          if (c.io.reorder.bits.endOfRecord.peek().litToBoolean) None
+          else Some(c.io.reorder.bits.attributeId.peek().litValue.toInt)
+        )
       }
       c.clock.step()
     }
@@ -119,8 +129,22 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
     }
 
-    /** Offers one descriptor until the loader takes it. */
-    def submit(start: Int, length: Int, id: Int): Unit = {
+    /** Pulses endOfRecord for one cycle, as the PDA does. */
+    def endOfRecord(): Unit = {
+      c.io.endOfRecord.poke(true.B)
+      tick()
+      c.io.endOfRecord.poke(false.B)
+    }
+
+    /** Offers one descriptor until the loader takes it. With endsRecord, the
+      * end-of-record pulse comes in the cycle the descriptor is accepted.
+      */
+    def submit(
+        start: Int,
+        length: Int,
+        id: Int,
+        endsRecord: Boolean = false
+    ): Unit = {
       c.io.descriptor.bits.startAddress.poke(start.U)
       c.io.descriptor.bits.length.poke(length.U)
       c.io.descriptor.bits.attributeId.poke(id.U)
@@ -131,7 +155,9 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
         waited += 1
         assert(waited < 200, "The descriptor was never accepted")
       }
+      c.io.endOfRecord.poke(endsRecord.B)
       tick()
+      c.io.endOfRecord.poke(false.B)
       c.io.descriptor.valid.poke(false.B)
     }
 
@@ -283,6 +309,55 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.waitForWords(1)
       assert(d.words.toSeq == Seq(Word(0, "2345", 2, 5, last = true, 255)))
       assert(d.reorderIds.toSeq == Seq(255))
+    }
+  }
+
+  it should "write an end-of-record entry after the attributes of the record" in {
+    run(raw) { d =>
+      d.load(text)
+      d.submit(0, 2, 0)
+      d.submit(2, 2, 0)
+      d.endOfRecord()
+      for (_ <- 0 until 5) d.tick()
+      assert(d.reorder.toSeq == Seq(Some(0), Some(0), None))
+    }
+  }
+
+  it should "put the end of record behind a descriptor accepted in the same cycle" in {
+    run(raw) { d =>
+      d.load(text)
+      d.submit(0, 2, 0)
+      d.submit(13, 6, 0, endsRecord = true)
+      d.waitForWords(3)
+      assert(d.reorder.toSeq == Seq(Some(0), Some(0), None))
+      assert(d.words.map(_.text).mkString == "01defghi")
+    }
+  }
+
+  it should "hold the end of record until the reorder FIFO takes it" in {
+    run(raw) { d =>
+      d.load(text)
+      d.submit(0, 2, 0)
+      d.waitForWords(1)
+      d.reorderReady = false
+      d.endOfRecord()
+      for (_ <- 0 until 10) d.tick()
+      assert(d.reorder.toSeq == Seq(Some(0)))
+      d.reorderReady = true
+      // The first attribute of the next record must come after the entry.
+      d.submit(2, 2, 0)
+      d.waitForWords(2)
+      assert(d.reorder.toSeq == Seq(Some(0), None, Some(0)))
+    }
+  }
+
+  it should "write an end-of-record entry for a record without attributes" in {
+    run(raw) { d =>
+      d.endOfRecord()
+      for (_ <- 0 until 3) d.tick()
+      d.endOfRecord()
+      for (_ <- 0 until 3) d.tick()
+      assert(d.reorder.toSeq == Seq(None, None))
     }
   }
 }

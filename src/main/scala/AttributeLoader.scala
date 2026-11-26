@@ -36,7 +36,9 @@ class AttributeWord extends Bundle {
   * the InputBuffer and writes them, whole, to the FIFO of one parser channel.
   * Each word is tagged with the bytes that belong to the attribute. For every
   * attribute it also writes the attribute id to the reorder FIFO, so the output
-  * side knows the order of the document.
+  * side knows the order of the document. When the PDA signals the end of the
+  * record, one end-of-record entry follows the entries of that record's
+  * attributes.
   *
   * Channels are laid out as config.channelTypes. Attributes of one value type
   * are dealt to the channels of that type in rotation.
@@ -54,6 +56,12 @@ class AttributeLoader(config: JsonPathConfig) extends Module {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val channels = Vec(channelTypes.length, Decoupled(new AttributeWord))
     val reorder = Decoupled(new ReorderEntry)
+
+    // The PDA's end-of-record pulse. It never comes before the last descriptor
+    // of its record has been accepted.
+    val endOfRecord = Input(Bool())
+    // An end of record has been signaled but its reorder entry is not written.
+    val endPending = Output(Bool())
 
     // Read port of the InputBuffer. The loader is its only user.
     val readEnable = Output(Bool())
@@ -89,11 +97,20 @@ class AttributeLoader(config: JsonPathConfig) extends Module {
     }
   )
 
-  // The reorder entry is written in the same cycle, so one must fit.
-  io.descriptor.ready := state === idle && io.reorder.ready
-  io.reorder.valid := state === idle && io.descriptor.valid
-  io.reorder.bits.attributeId := id
-  io.reorder.bits.endOfRecord := false.B
+  // The end-of-record pulse cannot be stalled, so it is remembered here until
+  // its entry fits in the reorder FIFO. No descriptor is accepted in the
+  // meantime, so the entry always comes before those of the next record.
+  val endPending = RegInit(false.B)
+  when(endPending && io.reorder.ready) { endPending := false.B }
+  when(io.endOfRecord) { endPending := true.B }
+  io.endPending := endPending
+
+  // The reorder entry of an attribute is written in the cycle its descriptor
+  // is accepted, so one must fit.
+  io.descriptor.ready := state === idle && io.reorder.ready && !endPending
+  io.reorder.valid := endPending || (state === idle && io.descriptor.valid)
+  io.reorder.bits.attributeId := id // not used by an end-of-record entry
+  io.reorder.bits.endOfRecord := endPending
 
   io.readEnable := state === request
   io.readAddress := address(11, 3)

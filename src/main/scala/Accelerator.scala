@@ -78,6 +78,7 @@ class Accelerator(
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
   execution.io.descriptor <> pda.io.descriptor
+  execution.io.endOfRecord := pda.io.endOfRecord
 
   // The execution stage loads each value and sends it raw, as a number or as
   // a string, depending on the value type of its path.
