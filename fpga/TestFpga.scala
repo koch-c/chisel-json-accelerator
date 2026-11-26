@@ -1,25 +1,22 @@
 //> using scala 2.13.16
+//> using file FpgaTestCases.scala
 
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
-import java.nio.charset.StandardCharsets.US_ASCII
+import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption.{READ, WRITE}
 import scala.sys.process._
 import scala.util.Using
 import scala.util.control.NonFatal
 
-/** UART smoke test for the bitstream from GenerateAcceleratorTop (Linux). */
+/** UART regression test for the bitstream from GenerateAcceleratorTop (Linux).
+  */
 object TestFpga {
-  private val record =
-    """{"status":"ignore","sensor":{"status":null,"temperature":-12.5},"user":{"id":99,"profile":{"city":"Aarhus"},"active":true,"name":"Ada"},"id":7}""" + "\n"
-  // Raw matches in input order, with no separators or trailing newline.
-  private val expected =
-    """:null:-12.5:"Aarhus":true:"Ada":7""".getBytes(US_ASCII)
   private val windowNanos = 1000000000L
 
-  private def exchange(port: String): Array[Byte] =
+  private def exchange(port: String): Unit =
     Using.resource(FileChannel.open(Path.of(port), READ, WRITE)) { uart =>
       def stty(args: String*): String =
         (Seq("stty", "-F", port) ++ args).!!.trim
@@ -44,20 +41,18 @@ object TestFpga {
           "time",
           "1"
         )
-        val request = ByteBuffer.wrap(record.getBytes(US_ASCII))
-        while (request.hasRemaining) uart.write(request)
-        val deadline = System.nanoTime() + windowNanos
-        val received = new ByteArrayOutputStream()
-        val buffer = ByteBuffer.allocate(expected.length + 1)
-        // Keep reading after a full frame so a spurious second match fails.
-        while (
-          received.size() <= expected.length && System.nanoTime() - deadline < 0
-        ) {
-          buffer.clear()
-          val count = uart.read(buffer)
-          if (count > 0) received.write(buffer.array(), 0, count)
+        for (request <- FpgaTestCases.requests) {
+          val input = ByteBuffer.wrap((request.json + "\n").getBytes(UTF_8))
+          while (input.hasRemaining) uart.write(input)
+          val expected = request.expected.map(_.toByte).toArray
+          val received = readResponse(uart, expected.length)
+          if (!received.sameElements(expected)) {
+            throw new java.io.IOException(
+              s"${request.name}: expected ${hex(expected)}, received ${hex(received)}"
+            )
+          }
+          println(s"PASS: ${request.name} (${received.length} bytes)")
         }
-        received.toByteArray
       } finally {
         // Some tty drivers report a partial restore even when the saved state matches.
         val status = Seq("stty", "-F", port, original).!(ProcessLogger(_ => ()))
@@ -68,8 +63,26 @@ object TestFpga {
       }
     }
 
-  private def hex(bytes: Array[Byte]): String =
+  private def readResponse(uart: FileChannel, size: Int): Array[Byte] = {
+    val deadline = System.nanoTime() + windowNanos
+    val received = new ByteArrayOutputStream()
+    val buffer = ByteBuffer.allocate(size + 1)
+    var quietAfterResponse = false
+    // Wait for a quiet read after a full response to catch extra bytes before
+    // sending the next line. Some TTYs surface a timed-out read as EOF.
+    while (
+      !quietAfterResponse && received.size() <= size && System
+        .nanoTime() - deadline < 0
+    ) {
+      buffer.clear()
+      val count = uart.read(buffer)
+      if (count > 0) received.write(buffer.array(), 0, count)
+      else if (received.size() == size) quietAfterResponse = true
+    }
+    received.toByteArray
+  }
 
+  private def hex(bytes: Array[Byte]): String =
     if (bytes.isEmpty) "(no bytes)"
     else bytes.map(b => f"${b & 0xff}%02x").mkString(" ")
 
@@ -79,20 +92,12 @@ object TestFpga {
       sys.exit(2)
     }
     val port = args.headOption.getOrElse("/dev/ttyUSB0")
-    val received =
-      try exchange(port)
-      catch {
-
-        case NonFatal(error) =>
-          Console.err.println(s"FAIL: $port: ${error.getMessage}")
-          sys.exit(1)
-      }
-    if (!received.sameElements(expected)) {
-      Console.err.println(
-        s"FAIL: $port: expected ${hex(expected)}, received ${hex(received)}"
-      )
-      sys.exit(1)
+    try exchange(port)
+    catch {
+      case NonFatal(error) =>
+        Console.err.println(s"FAIL: $port: ${error.getMessage}")
+        sys.exit(1)
     }
-    println(s"PASS: $port: six Raw matches: ${new String(received, US_ASCII)}")
+    println(s"PASS: $port: all ${FpgaTestCases.requests.size} requests")
   }
 }

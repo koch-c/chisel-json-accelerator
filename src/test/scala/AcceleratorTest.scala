@@ -141,6 +141,16 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "match the FPGA profile for nested fields and filter boundaries" in {
+    run(FpgaProfile.config, stall = true) { d =>
+      for (request <- FpgaTestCases.requests) {
+        withClue(s"${request.name}: ") {
+          d.recordBytes(request.json + "\n", request.expected)
+        }
+      }
+    }
+  }
+
   it should "send a rejection byte between two kept records" in {
     val path = Seq("v")
     val config = JsonPathConfig(
