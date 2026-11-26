@@ -13,6 +13,11 @@ object ValueType {
 
   /** Parsed by NumberParser and sent as a 64-bit two's complement integer. */
   case object Int64 extends ValueType
+
+  /** Decoded by StringParser and sent without quotes, followed by 0x00 and a
+    * flags byte.
+    */
+  case object String extends ValueType
 }
 
 final case class FieldSpec(
@@ -33,7 +38,8 @@ final case class FilterSpec(
 final case class JsonPathConfig(
     fields: Seq[FieldSpec],
     maxDepth: Int = 8,
-    filters: Seq[FilterSpec] = Nil
+    filters: Seq[FilterSpec] = Nil,
+    parsersPerType: Int = 1
 ) {
   require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
@@ -55,10 +61,23 @@ final case class JsonPathConfig(
     filters.forall(filter => attributeIds.contains(filter.path)),
     "filters must reference projected fields"
   )
+  require(parsersPerType >= 1, "parsersPerType must be at least one")
 
   /** Distinct keys across all paths, in key-symbol code order. */
   val keys: Seq[String] = paths.flatten.distinct
 
   /** Stable key-symbol codes expected from the path encoder. */
   val keyIds: Map[String, Int] = keys.zipWithIndex.toMap
+
+  /** The value types in use, each listed once. Parsers are only generated for
+    * these.
+    */
+  val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct
+
+  /** The value type of every parser channel: parsersPerType channels for each
+    * value type in use, e.g. Seq(Int32, Int32, String, String).
+    */
+  val channelTypes: Seq[ValueType] =
+    usedValueTypes.flatMap(t => Seq.fill(parsersPerType)(t))
+
 }

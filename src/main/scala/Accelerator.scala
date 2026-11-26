@@ -3,18 +3,15 @@ import chisel3.util._
 
 /** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
   * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * contains the exact AttributeLoader bytes, without added framing. done pulses
-  * for one cycle after LF, parsing, and all output transfers finish. It denotes
-  * byte acceptance by the consumer, not physical UART completion.
+  * depends on the value type of the matched path: the exact bytes of the
+  * attribute without added framing (Raw), a NumberSerializer frame, or a
+  * StringParser frame. Values are sent in document order. done pulses for one
+  * cycle after LF, parsing, and all output transfers finish. It denotes byte
+  * acceptance by the consumer, not physical UART completion.
   */
 class Accelerator(
     config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature"))))
 ) extends Module {
-  private val valueType = config.fields.head.valueType
-  require(
-    config.fields.forall(_.valueType == valueType),
-    "mixed field types require per-field parser routing"
-  )
 
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(8.W)))
@@ -44,7 +41,7 @@ class Accelerator(
     )
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
-  val loader = withReset(recordReset) { Module(new AttributeLoader) }
+  val execution = withReset(recordReset) { Module(new ExecutionStage(config)) }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -73,55 +70,28 @@ class Accelerator(
       lineStored := true.B
     }
   }
-  buffer.io.readEnable := loader.io.readEnable
-  buffer.io.readAddress := loader.io.readAddress
-  loader.io.readData := buffer.io.readData
-  loader.io.readValid := buffer.io.readValid
+  buffer.io.readEnable := execution.io.readEnable
+  buffer.io.readAddress := execution.io.readAddress
+  execution.io.readData := buffer.io.readData
+  execution.io.readValid := buffer.io.readValid
 
   fifo.io.in <> lexer.io.out
   pda.io.in <> fifo.io.out
-  loader.io.descriptor <> pda.io.descriptor
+  execution.io.descriptor <> pda.io.descriptor
 
-  // Output stage can choose between the raw output or a parsed number.
-  val lastOut = valueType match {
-    case ValueType.Raw =>
-      io.out.valid := loader.io.out.valid
-      io.out.bits := loader.io.out.bits.data
-      loader.io.out.ready := io.out.ready
-      loader.io.out.bits.last
-    case _ =>
-      val parser = withReset(recordReset) { Module(new NumberParser) }
-      val serializer = withReset(recordReset) {
-        Module(new NumberSerializer(valueType))
-      }
-      parser.io.in <> loader.io.out
-      serializer.io.in <> parser.io.out
-      io.out <> serializer.io.out
-      serializer.io.last
-  }
+  // The execution stage loads each value and sends it raw, as a number or as
+  // a string, depending on the value type of its path.
+  io.out <> execution.io.out
 
   val endSeen = RegInit(false.B)
-
-  // Attributes that have been handed to the loader but whose output has not
-  // been fully accepted yet. At most three: one each in the loader, the number
-  // parser and the serializer.
-  val pendingAttributes = RegInit(0.U(2.W))
-  val attributeStarted = loader.io.descriptor.fire
-  val attributeFinished = io.out.fire && lastOut
-  val attributeBusy = pendingAttributes =/= 0.U
-
   when(pda.io.endOfRecord) { endSeen := true.B }
-  when(attributeStarted && !attributeFinished) {
-    pendingAttributes := pendingAttributes + 1.U
-  }
-  when(attributeFinished && !attributeStarted) {
-    pendingAttributes := pendingAttributes - 1.U
-  }
 
-  // A closing brace may be parsed before LF arrives. Output backpressure holds
-  // attributeBusy until the final byte is actually accepted by the consumer.
+  // A closing brace may be parsed before LF arrives. The execution stage is
+  // busy from the moment it accepts a descriptor until the final byte of that
+  // attribute is actually accepted by the consumer, so output backpressure
+  // delays the reset.
   clearRecord := false.B
-  when(!clearRecord && lineStored && endSeen && !attributeBusy) {
+  when(!clearRecord && lineStored && endSeen && !execution.io.busy) {
     clearRecord := true.B
   }
   when(clearRecord) {
@@ -129,6 +99,5 @@ class Accelerator(
     wordCount := 0.U
     lineStored := false.B
     endSeen := false.B
-    pendingAttributes := 0.U
   }
 }

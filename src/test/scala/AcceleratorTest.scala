@@ -106,6 +106,10 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       (0 until 2).map(i => (exp10 >> (8 * i)) & 0xff)
   }
 
+  /** The StringParser frame for one decoded string. */
+  private def stringFrame(id: Int, text: String, flags: Int = 0): Seq[Int] =
+    Seq(id) ++ text.getBytes("UTF-8").map(_ & 0xff) ++ Seq(0, flags)
+
   "Accelerator" should "extract numbers and reset between matching and missing records" in {
     run(raw(Seq("temperature"))) { d =>
       d.record("{\"temperature\": 25,\"humidity\":60}\n", ": 25")
@@ -284,6 +288,144 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
           0)
       )
     }
+  }
+
+  it should "send a string as a decoded frame and nothing for a missing key" in {
+    run(
+      JsonPathConfig(Seq(FieldSpec(Seq("name"), ValueType.String)))
+    ) { d =>
+      d.recordBytes("{\"name\": \"Ada\",\"age\":36}\n", stringFrame(0, "Ada"))
+      d.recordBytes("{\"age\":36}\n", Seq.empty)
+      d.recordBytes("{\"name\":\"\"  }\n", stringFrame(0, ""))
+    }
+  }
+
+  it should "decode escapes and keep structural characters in a string" in {
+    run(JsonPathConfig(Seq(FieldSpec(Seq("name"), ValueType.String)))) { d =>
+      d.recordBytes(
+        "{\"name\" : \"a\\\"b,}:\\n\\\\ \\/\" }\n",
+        stringFrame(0, "a\"b,}:\n\\ /")
+      )
+      // \u0041 is not decoded: the frame is flagged with badEscape.
+      d.recordBytes(
+        "{\"name\" : \"\\u0041\" }\n",
+        stringFrame(0, "u0041", flags = 2)
+      )
+    }
+  }
+
+  it should "decode a string selected by a nested path" in {
+    run(
+      JsonPathConfig(
+        Seq(FieldSpec(Seq("device", "location", "city"), ValueType.String))
+      )
+    ) { d =>
+      d.recordBytes(
+        "{\"city\":\"x\",\"device\":{\"location\":{\"city\": \"Kongens Lyngby\"}}}\n",
+        stringFrame(0, "Kongens Lyngby")
+      )
+    }
+  }
+
+  it should "send one string frame per match under output backpressure" in {
+    run(
+      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.String))),
+      stall = true
+    ) { d =>
+      d.recordBytes(
+        "{\"v\":\"one\",\"v\":2,\"v\":\"0123456789abcdefghij\"}\n",
+        stringFrame(0, "one") ++ stringFrame(0, "", flags = 1) ++
+          stringFrame(0, "0123456789abcdefghij")
+      )
+      d.recordBytes("{\"v\":\"again\"}\n", stringFrame(0, "again"))
+    }
+  }
+
+  it should "flag a value that is not a string" in {
+    run(JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.String)))) { d =>
+      d.recordBytes("{\"v\": 21}\n", stringFrame(0, "", flags = 1))
+      d.recordBytes("{\"v\":null}\n", stringFrame(0, "", flags = 1))
+      d.recordBytes("{\"v\":\"hot\"}\n", stringFrame(0, "hot"))
+    }
+  }
+
+  it should "give each path its own value type and attribute id" in {
+    // Field 0 is the Int32 and field 1 the string. A number frame starts with
+    // a reserved 0x00 byte, a string frame with its attribute id.
+    val config = JsonPathConfig(
+      Seq(
+        FieldSpec(Seq("id"), ValueType.Int32),
+        FieldSpec(Seq("user", "name"), ValueType.String)
+      )
+    )
+    run(config) { d =>
+      d.recordBytes(
+        "{\"id\":7,\"user\":{\"name\":\"bob\",\"id\":9},\"tags\":[1,2]}\n",
+        Seq(0, 0, 7, 0, 0, 0) ++ stringFrame(1, "bob")
+      )
+      // Document order, not config order.
+      d.recordBytes(
+        "{\"user\":{\"name\":\"Ada\"},\"id\":-2}\n",
+        stringFrame(1, "Ada") ++ Seq(0, 1, 0xfe, 0xff, 0xff, 0xff)
+      )
+      d.recordBytes("{\"other\":1}\n", Seq.empty)
+    }
+  }
+
+  it should "keep document order with several parsers per type" in {
+    val config = JsonPathConfig(
+      Seq(FieldSpec(Seq("v"), ValueType.String)),
+      parsersPerType = 2
+    )
+    val long = "a first value that takes much longer to send than the next"
+    run(config, stall = true) { d =>
+      d.recordBytes(
+        "{\"v\":\"" + long + "\",\"v\":\"b\",\"v\":3,\"v\":\"d\"}\n",
+        stringFrame(0, long) ++ stringFrame(0, "b") ++
+          stringFrame(0, "", flags = 1) ++ stringFrame(0, "d")
+      )
+      d.recordBytes("{\"v\":\"again\"}\n", stringFrame(0, "again"))
+    }
+  }
+
+  it should "give the same output with one parser per type and with three" in {
+    val random = new scala.util.Random(11)
+    def value(): String =
+      if (random.nextBoolean()) (random.nextInt(200000) - 100000).toString
+      else
+        "\"" + Seq
+          .fill(random.nextInt(12))("abc xyz,}:".charAt(random.nextInt(10)))
+          .mkString + "\""
+    // Records with several matches close together, where the channels overlap.
+    val records = Seq.fill(12) {
+      val fields = Seq.fill(1 + random.nextInt(5)) {
+        val key = Seq("n", "s", "skip")(random.nextInt(3))
+        "\"" + key + "\":" + " " * random.nextInt(3) + value()
+      }
+      "{" + fields.mkString(",") + "}\n"
+    }
+    def outputWith(parsers: Int): Seq[Int] = {
+      var result = Seq.empty[Int]
+      val config = JsonPathConfig(
+        Seq(
+          FieldSpec(Seq("n"), ValueType.Number),
+          FieldSpec(Seq("s"), ValueType.String)
+        ),
+        parsersPerType = parsers
+      )
+      run(config, stall = parsers > 1) { d =>
+        for (record <- records) {
+          val previous = d.completions
+          d.send(record)
+          d.waitFor(d.completions > previous)
+        }
+        result = d.output.toSeq
+      }
+      result
+    }
+    val reference = outputWith(1)
+    assert(reference.nonEmpty)
+    assert(outputWith(3) == reference)
   }
 
   it should "match a software reference for random numbers" in {

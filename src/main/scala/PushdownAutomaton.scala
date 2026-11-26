@@ -95,12 +95,13 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
       current: PdaState,
       symbol: JsonSymbol,
       symbolValid: Bool
-  ): (PdaState, Bool, UInt, UInt, Bool) = {
+  ): (PdaState, Bool, UInt, UInt, UInt, Bool) = {
     val next = Wire(new PdaState(trieStateCount - 1, maxDepth))
     next := current
     val project = WireDefault(false.B)
     val projectAddress = WireDefault(0.U(12.W))
     val projectLength = WireDefault(0.U(13.W))
+    val projectId = WireDefault(0.U(8.W))
     val endOfRecord = WireDefault(false.B)
 
     // A key transition is selected from TOS-1 and writes its target into TOS.
@@ -169,6 +170,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
             project := true.B
             projectAddress := current.colonAddress
             projectLength := symbol.addr - current.colonAddress
+            projectId := current.attributeId
             next.projecting := false.B
           }
           // If the stackpointer is not 0, we inject a zero in the stack.
@@ -184,6 +186,7 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
             project := true.B
             projectAddress := current.colonAddress
             projectLength := symbol.addr - current.colonAddress
+            projectId := current.attributeId
             next.projecting := false.B
           }
           // If the stackpointer is progressed, we remove one from the stackpointer.
@@ -198,22 +201,23 @@ class PushdownAutomaton(config: JsonPathConfig) extends Module {
         }
     }
 
-    (next, project, projectAddress, projectLength, endOfRecord)
+    (next, project, projectAddress, projectLength, projectId, endOfRecord)
   }
 
   // Two concurrent symbols are processed. The valid entry, says within the entries are there a valid symbol.
   val valid0 = io.in.valid && io.in.bits.count > 0.U
   val valid1 = io.in.valid && io.in.bits.count > 1.U
-  val (after0, project0, address0, length0, eor0) =
+  val (after0, project0, address0, length0, id0, eor0) =
     transition(state, io.in.bits.entries(0), valid0)
-  val (after1, project1, address1, length1, eor1) =
+  val (after1, project1, address1, length1, id1, eor1) =
     transition(after0, io.in.bits.entries(1), valid1)
 
-  // AttributeLoader accepts one descriptor per cycle. If both PDA stages
+  // The AttributeLoader takes one descriptor at a time. If both PDA stages
   // finish projections together, retain the second until the loader accepts it.
   val firstProject = project0 || project1
   val firstAddress = Mux(project0, address0, address1)
   val firstLength = Mux(project0, length0, length1)
+  val firstId = Mux(project0, id0, id1)
   val hasSecondProject = project0 && project1
 
   io.descriptor.valid := pendingDescriptor || firstProject

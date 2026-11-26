@@ -31,4 +31,21 @@ class JsonPathConfigTest extends AnyFlatSpec {
     assert(JsonPathConfig(fields.take(256)).attributeIds(Seq("key255")) == 255)
     intercept[IllegalArgumentException](JsonPathConfig(fields))
   }
+
+  it should "list a value type once when several fields share it" in {
+    val config = JsonPathConfig(
+      Seq(
+        FieldSpec(Seq("a"), ValueType.String),
+        FieldSpec(Seq("b"), ValueType.Int32),
+        FieldSpec(Seq("c"), ValueType.String)
+      )
+    )
+    assert(config.usedValueTypes == Seq(ValueType.String, ValueType.Int32))
+  }
+
+  it should "reject a configuration without parsers" in {
+    intercept[IllegalArgumentException](
+      JsonPathConfig(Seq(FieldSpec(Seq("id"))), parsersPerType = 0)
+    )
+  }
 }
