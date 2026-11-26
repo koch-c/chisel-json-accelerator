@@ -4,7 +4,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
   case class Result(
-      id: Int,
       negative: Boolean,
       integer: BigInt,
       mantissa: BigInt,
@@ -24,7 +23,6 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
 
     c.io.in.valid.poke(false.B)
     c.io.in.bits.data.poke(0.U)
-    c.io.in.bits.attributeId.poke(0.U)
     c.io.in.bits.last.poke(false.B)
     c.io.out.ready.poke(false.B)
 
@@ -34,7 +32,6 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.out.ready.poke(ready.B)
       if (valid && ready) {
         results += Result(
-          c.io.out.bits.attributeId.peek().litValue.toInt,
           c.io.out.bits.negative.peek().litToBoolean,
           c.io.out.bits.integer.peek().litValue,
           c.io.out.bits.mantissa.peek().litValue,
@@ -57,7 +54,6 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       for ((byte, index) <- bytes.zipWithIndex) {
         c.io.in.valid.poke(true.B)
         c.io.in.bits.data.poke((byte & 0xff).U)
-        c.io.in.bits.attributeId.poke(id.U)
         c.io.in.bits.last.poke((index == bytes.length - 1).B)
         var waited = 0
         while (!c.io.in.ready.peek().litToBoolean && waited < 50) {
@@ -102,7 +98,6 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new NumberParser) { c =>
       val d = new Driver(c)
       val r = d.parse(": 25", id = 3)
-      assert(r.id == 3)
       assert(!r.negative)
       assert(r.integer == 25)
       assert(!r.isFloat)
@@ -123,7 +118,6 @@ class NumberParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       id: Int = 0
   ): Unit = {
     val r = d.parse(text, id)
-    assert(r.id == id, s"attribute id for '$text'")
     assert(!r.overflow, s"overflow for '$text'")
     assert(!r.notANumber, s"notANumber for '$text'")
     assert(r.negative == negative, s"sign for '$text'")

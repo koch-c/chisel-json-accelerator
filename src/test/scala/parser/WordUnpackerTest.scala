@@ -3,7 +3,7 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
 class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
-  private case class Out(data: Char, last: Boolean, id: Int)
+  private case class Out(data: Char, last: Boolean)
 
   /** Character i of the text goes in byte i. */
   private def word(text: String): BigInt =
@@ -23,8 +23,7 @@ class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
       if (ready && c.io.out.valid.peek().litToBoolean) {
         out += Out(
           c.io.out.bits.data.peek().litValue.toChar,
-          c.io.out.bits.last.peek().litToBoolean,
-          c.io.out.bits.attributeId.peek().litValue.toInt
+          c.io.out.bits.last.peek().litToBoolean
         )
         cycles += cycle
       }
@@ -47,7 +46,6 @@ class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
       c.io.in.bits.firstByte.poke(first.U)
       c.io.in.bits.lastByte.poke(lastByte.U)
       c.io.in.bits.last.poke(last.B)
-      c.io.in.bits.attributeId.poke(id.U)
       var guard = 0
       while (!tick()) { guard += 1; assert(guard < 200, "word never accepted") }
       c.io.in.valid.poke(false.B)
@@ -70,7 +68,7 @@ class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
     it should s"send a single-byte attribute (stall = $stall)" in run(stall) {
       d =>
         d.send("...x....", first = 3, lastByte = 3, last = true, id = 7)
-        assert(d.out.toSeq == Seq(Out('x', last = true, id = 7)))
+        assert(d.out.toSeq == Seq(Out('x', last = true)))
     }
 
     it should s"continue an attribute in the next word (stall = $stall)" in run(
@@ -95,7 +93,6 @@ class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.send("ab......", first = 0, lastByte = 1, last = true, id = 1)
       d.send("...cde..", first = 3, lastByte = 5, last = true, id = 2)
       assert(d.out.map(_.data).mkString == "abcde")
-      assert(d.out.map(_.id) == Seq(1, 1, 2, 2, 2))
       assert(d.out.map(_.last) == Seq(false, true, false, false, true))
     }
   }

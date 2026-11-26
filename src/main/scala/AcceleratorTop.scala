@@ -5,7 +5,7 @@ import chisel3._
   * control. TX adds no framing to the raw output.
   */
 class AcceleratorTop(
-    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature")))),
+    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("id")))),
     clockHz: Int = 100000000,
     baudRate: Int = 115200
 ) extends Module {
@@ -29,12 +29,14 @@ object GenerateAcceleratorTop extends App {
     new AcceleratorTop(
       JsonPathConfig(
         fields = Seq(
-          FieldSpec(Seq("id")),
-          FieldSpec(Seq("user", "name")),
-          FieldSpec(Seq("user", "active")),
-          FieldSpec(Seq("user", "profile", "city")),
-          FieldSpec(Seq("sensor", "temperature")),
-          FieldSpec(Seq("sensor", "status"))
+          FieldSpec(Seq("id"), ValueType.Int64),
+          FieldSpec(Seq("user", "name"), ValueType.String, stringBytes = 32),
+          FieldSpec(
+            Seq("user", "profile", "city"),
+            ValueType.String,
+            stringBytes = 32
+          ),
+          FieldSpec(Seq("sensor", "status"), ValueType.String, stringBytes = 16)
         )
       )
     ),

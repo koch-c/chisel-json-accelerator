@@ -12,7 +12,7 @@ class AttributeLoaderHarness(config: JsonPathConfig) extends Module {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val channels =
       Vec(config.channelTypes.length, Decoupled(new AttributeWord))
-    val reorder = Decoupled(new ReorderEntry)
+    val reorder = Decoupled(new DispatchEntry(config))
     val endOfRecord = Input(Bool())
   })
 
@@ -41,8 +41,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       text: String,
       firstByte: Int,
       lastByte: Int,
-      last: Boolean,
-      id: Int
+      last: Boolean
   )
 
   private class Driver(c: AttributeLoaderHarness, channels: Int) {
@@ -74,8 +73,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
             text,
             first,
             last,
-            port.bits.last.peek().litToBoolean,
-            port.bits.attributeId.peek().litValue.toInt
+            port.bits.last.peek().litToBoolean
           )
         }
       }
@@ -122,8 +120,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
             text,
             first,
             last,
-            port.bits.last.peek().litToBoolean,
-            port.bits.attributeId.peek().litValue.toInt
+            port.bits.last.peek().litToBoolean
           )
         )
       }
@@ -186,7 +183,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.load(text)
       d.submit(start = 2, length = 4, id = 0)
       d.waitForWords(1)
-      assert(d.words.toSeq == Seq(Word(0, "2345", 2, 5, last = true, 0)))
+      assert(d.words.toSeq == Seq(Word(0, "2345", 2, 5, last = true)))
       assert(d.reorderIds.toSeq == Seq(0))
     }
   }
@@ -198,8 +195,8 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.waitForWords(2)
       assert(
         d.words.toSeq == Seq(
-          Word(0, "def", 5, 7, last = false, 0),
-          Word(0, "ghi", 0, 2, last = true, 0)
+          Word(0, "def", 5, 7, last = false),
+          Word(0, "ghi", 0, 2, last = true)
         )
       )
     }
@@ -222,7 +219,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
   it should "deal the attributes of one type to its channels in rotation" in {
     val config = JsonPathConfig(
       Seq(FieldSpec(Seq("v"), ValueType.Int32)),
-      parsersPerType = 2
+      numericParsers = 2
     )
     run(config) { d =>
       d.load(text)
@@ -250,7 +247,6 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.submit(4, 2, id = 1)
       d.waitForWords(3)
       assert(d.words.map(_.channel) == Seq(1, 0, 1))
-      assert(d.words.map(_.id) == Seq(1, 0, 1))
       assert(d.reorderIds.toSeq == Seq(1, 0, 1))
     }
   }
@@ -274,14 +270,14 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.channelReady(0) = false
       d.submit(start = 13, length = 6, id = 0)
       for (_ <- 0 until 5) d.tick()
-      val first = Word(0, "def", 5, 7, last = false, 0)
+      val first = Word(0, "def", 5, 7, last = false)
       for (_ <- 0 until 10) {
         assert(d.offered(0).contains(first))
         d.tick()
       }
       d.channelReady(0) = true
       d.waitForWords(2)
-      assert(d.words.toSeq == Seq(first, Word(0, "ghi", 0, 2, last = true, 0)))
+      assert(d.words.toSeq == Seq(first, Word(0, "ghi", 0, 2, last = true)))
     }
   }
 
@@ -291,13 +287,13 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.load("ABCDEFGH", firstWord = 511)
       d.submit(start = 4094, length = 2, id = 0)
       d.waitForWords(1)
-      assert(d.words.toSeq == Seq(Word(0, "GH", 6, 7, last = true, 0)))
+      assert(d.words.toSeq == Seq(Word(0, "GH", 6, 7, last = true)))
       // The address must not wrap around into another read.
       for (_ <- 0 until 10) d.tick()
       assert(d.words.length == 1)
       d.submit(start = 0, length = 3, id = 0)
       d.waitForWords(2)
-      assert(d.words.last == Word(0, "012", 0, 2, last = true, 0))
+      assert(d.words.last == Word(0, "012", 0, 2, last = true))
     }
   }
 
@@ -307,7 +303,7 @@ class AttributeLoaderSpec extends AnyFlatSpec with ChiselScalatestTester {
       d.load(text)
       d.submit(start = 2, length = 4, id = 255)
       d.waitForWords(1)
-      assert(d.words.toSeq == Seq(Word(0, "2345", 2, 5, last = true, 255)))
+      assert(d.words.toSeq == Seq(Word(0, "2345", 2, 5, last = true)))
       assert(d.reorderIds.toSeq == Seq(255))
     }
   }

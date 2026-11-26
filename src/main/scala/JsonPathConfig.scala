@@ -2,12 +2,6 @@
 sealed trait ValueType
 object ValueType {
 
-  /** The raw bytes from the colon up to the next ',' or '}'. */
-  case object Raw extends ValueType
-
-  /** Parsed by NumberParser and sent as decimal parts: mantissa and exp10. */
-  case object Number extends ValueType
-
   /** Parsed by NumberParser and sent as a 32-bit two's complement integer. */
   case object Int32 extends ValueType
 
@@ -22,7 +16,8 @@ object ValueType {
 
 final case class FieldSpec(
     path: Seq[String],
-    valueType: ValueType = ValueType.Raw
+    valueType: ValueType = ValueType.Int32,
+    stringBytes: Int = 32
 )
 
 /** A filter on a projected field, identified by its full path. */
@@ -39,7 +34,8 @@ final case class JsonPathConfig(
     fields: Seq[FieldSpec],
     maxDepth: Int = 8,
     filters: Seq[FilterSpec] = Nil,
-    parsersPerType: Int = 1
+    numericParsers: Int = 1,
+    stringParsers: Int = 1
 ) {
   require(fields.nonEmpty && fields.size <= 256, "expected 1 to 256 fields")
   require(maxDepth >= 1, "maxDepth must be at least one")
@@ -61,7 +57,12 @@ final case class JsonPathConfig(
     filters.forall(filter => attributeIds.contains(filter.path)),
     "filters must reference projected fields"
   )
-  require(parsersPerType >= 1, "parsersPerType must be at least one")
+  require(numericParsers >= 1 && stringParsers >= 1)
+  require(
+    fields.forall(f =>
+      f.valueType != ValueType.String || (f.stringBytes > 0 && f.stringBytes <= 65535)
+    )
+  )
 
   /** Distinct keys across all paths, in key-symbol code order. */
   val keys: Seq[String] = paths.flatten.distinct
@@ -74,10 +75,18 @@ final case class JsonPathConfig(
     */
   val usedValueTypes: Seq[ValueType] = fields.map(_.valueType).distinct
 
-  /** The value type of every parser channel: parsersPerType channels for each
-    * value type in use, e.g. Seq(Int32, Int32, String, String).
-    */
-  val channelTypes: Seq[ValueType] =
-    usedValueTypes.flatMap(t => Seq.fill(parsersPerType)(t))
-
+  val numbers =
+    if (fields.exists(_.valueType != ValueType.String)) numericParsers else 0
+  val strings =
+    if (usedValueTypes.contains(ValueType.String)) stringParsers else 0
+  val channelTypes =
+    Seq.fill(numbers)(ValueType.Int64) ++ Seq.fill(strings)(ValueType.String)
+  val sizes = fields.map(f =>
+    if (f.valueType == ValueType.String) f.stringBytes + 2
+    else if (f.valueType == ValueType.Int64) 8
+    else 4
+  )
+  val offsets = sizes.scanLeft(0)(_ + _).init
+  val statusBytes = (fields.size + 3) / 4
+  val recordBytes = statusBytes + sizes.sum
 }

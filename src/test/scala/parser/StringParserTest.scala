@@ -22,7 +22,6 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
 
     c.io.in.valid.poke(false.B)
     c.io.in.bits.data.poke(0.U)
-    c.io.in.bits.attributeId.poke(0.U)
     c.io.in.bits.last.poke(false.B)
     c.io.out.ready.poke(false.B)
 
@@ -54,7 +53,6 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
       for ((byte, index) <- bytes.zipWithIndex) {
         c.io.in.valid.poke(true.B)
         c.io.in.bits.data.poke((byte & 0xff).U)
-        c.io.in.bits.attributeId.poke(id.U)
         c.io.in.bits.last.poke((index == bytes.length - 1).B)
         var waited = 0
         while (!tick() && waited < 50) waited += 1
@@ -86,7 +84,7 @@ class StringParserSpec extends AnyFlatSpec with ChiselScalatestTester {
 
   /** The frame for a decoded string. */
   private def frame(id: Int, text: String, flags: Int = 0): Seq[Int] =
-    Seq(id) ++ text.getBytes("UTF-8").map(_ & 0xff) ++ Seq(0, flags)
+    text.getBytes("UTF-8").map(_ & 0xff).toSeq ++ Seq(flags)
 
   private def check(
       d: Driver,

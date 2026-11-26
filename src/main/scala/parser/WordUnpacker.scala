@@ -16,7 +16,6 @@ class WordUnpacker() extends Module {
 
   io.out.valid := io.in.valid
   io.out.bits.data := (io.in.bits.data >> (byteIndex << 3))(7, 0)
-  io.out.bits.attributeId := io.in.bits.attributeId
   io.out.bits.last := atLastByte && io.in.bits.last
   io.in.ready := atLastByte && io.out.ready
 

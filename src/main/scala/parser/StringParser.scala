@@ -1,26 +1,7 @@
 import chisel3._
 import chisel3.util._
 
-/** Decodes one string attribute and sends it as a frame, one byte per cycle.
-  *
-  * The input is the byte stream of a single attribute from the WordUnpacker,
-  * the same as for the NumberParser: it starts at the colon and runs up to the
-  * next ',' or '}', e.g. `: "a\nb" `. The final byte has `last` set.
-  *
-  * The frame is streamed while the string is read, so nothing is buffered:
-  *
-  * byte 0 attribute id bytes 1..n the decoded string, without the quotes (n may
-  * be 0) byte n+1 0x00 terminator byte n+2 flags: bit 0 notAString, bit 1
-  * badEscape
-  *
-  * The escapes \" \\ \/ \b \f \n \r \t are decoded. \\uXXXX is not: it sets
-  * badEscape, as does any unknown escape, and the character after the backslash
-  * is sent as it is. The string should then not be used.
-  *
-  * notAString is set when the attribute is not exactly one string: no opening
-  * or closing quote, other characters than whitespace around the string, or a
-  * raw control character inside it. Control characters are never sent, so the
-  * terminator is the only 0x00 in a frame.
+/** Streams decoded bytes, followed by one terminal beat carrying error flags.
   */
 class StringParser extends Module {
   val io = IO(new Bundle {
@@ -31,16 +12,8 @@ class StringParser extends Module {
 
   def ch(c: Char) = c.toInt.U(8.W)
 
-  // header:     send the attribute id, before the first byte is consumed
-  // start:      skip the colon and whitespace up to the opening quote
-  // body:       inside the string
-  // escape:     the previous character was a backslash
-  // after:      the closing quote has been seen
-  // terminator: send 0x00
-  // flags:      send the flags byte
-  val header :: start :: body :: escape :: after :: terminator :: flags :: Nil =
-    Enum(7)
-  val state = RegInit(header)
+  val start :: body :: escape :: after :: flags :: Nil = Enum(5)
+  val state = RegInit(start)
 
   val char = io.in.bits.data
 
@@ -90,10 +63,6 @@ class StringParser extends Module {
   io.last := false.B
 
   switch(state) {
-    is(header) {
-      io.out.valid := io.in.valid
-      io.out.bits := io.in.bits.attributeId
-    }
     is(start, after) {
       io.in.ready := true.B
     }
@@ -101,9 +70,6 @@ class StringParser extends Module {
       io.in.ready := io.out.ready || !emits
       io.out.valid := io.in.valid && emits
       io.out.bits := Mux(state === escape, unescaped, char)
-    }
-    is(terminator) {
-      io.out.valid := true.B
     }
     is(flags) {
       io.out.valid := true.B
@@ -115,11 +81,9 @@ class StringParser extends Module {
   // The frame bytes that do not come from an input byte.
   when(io.out.fire) {
     switch(state) {
-      is(header) { state := start }
-      is(terminator) { state := flags }
       is(flags) {
         // Frame sent: clear everything for the next attribute.
-        state := header
+        state := start
         notAStringR := false.B
         badEscapeR := false.B
       }
@@ -157,7 +121,7 @@ class StringParser extends Module {
     // The attribute's final byte: the string must be closed by now, either by
     // this byte or earlier.
     when(io.in.bits.last) {
-      state := terminator
+      state := flags
       val closesNow = state === body && isQuote
       when(!closesNow && state =/= after) { notAStringR := true.B }
     }

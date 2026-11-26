@@ -2,7 +2,7 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-/** UART smoke tests for raw and numeric output; detailed extraction tests use
+/** UART smoke tests for fixed-layout records; detailed extraction tests use
   * Accelerator directly.
   */
 class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
@@ -49,27 +49,36 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
         c.clock.step()
       }
 
-      for (b <- json.getBytes("UTF-8")) {
-        val bits = Seq(false) ++ (0 until 8).map(i =>
-          ((b & 0xff) & (1 << i)) != 0
-        ) ++ Seq(true)
-        for (bit <- bits) {
-          c.io.uartRx.poke(bit.B)
-          for (_ <- 0 until clocksPerBit) tick()
+      // The host waits for the whole response before starting the next line.
+      for (
+        (line, response) <- Seq(
+          json -> expected,
+          "{}\n" -> Seq.fill(config.recordBytes)(0)
+        )
+      ) {
+        received.clear()
+        for (b <- line.getBytes("UTF-8")) {
+          val bits = Seq(false) ++ (0 until 8).map(i =>
+            ((b & 0xff) & (1 << i)) != 0
+          ) ++ Seq(true)
+          for (bit <- bits) {
+            c.io.uartRx.poke(bit.B)
+            for (_ <- 0 until clocksPerBit) tick()
+          }
         }
+        c.io.uartRx.poke(true.B)
+        var waited = 0
+        val timeout = 200 + response.length * 20 * clocksPerBit
+        while (received.length < response.length && waited < timeout) {
+          tick()
+          waited += 1
+        }
+        for (_ <- 0 until 2 * 10 * clocksPerBit) tick()
+        assert(
+          received.toSeq == response,
+          s"Unexpected UART response: ${received.toSeq}"
+        )
       }
-      c.io.uartRx.poke(true.B)
-      var waited = 0
-      val timeout = 200 + expected.length * 20 * clocksPerBit
-      while (received.length < expected.length && waited < timeout) {
-        tick()
-        waited += 1
-      }
-      for (_ <- 0 until 2 * 10 * clocksPerBit) tick()
-      assert(
-        received.toSeq == expected,
-        s"Unexpected UART response: ${received.toSeq}"
-      )
     }
   }
 
@@ -77,16 +86,16 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
     exchange(
       JsonPathConfig(Seq(FieldSpec(Seq("v")))),
       "{\"v\":1}\n",
-      Seq(':'.toInt, '1'.toInt)
+      Seq(1, 1, 0, 0, 0)
     )
   }
 
-  it should "send a number frame over UART" in {
-    // -12.5 is mantissa 125 with exp10 -1. Flags: negative and isFloat.
+  it should "send an invalid integer record over UART" in {
+    // Fractional syntax is invalid for an Int64 slot.
     exchange(
-      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.Number))),
+      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.Int64))),
       "{\"v\":-12.5}\n",
-      Seq(0, 3, 125, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff)
+      Seq(2) ++ Seq.fill(8)(0)
     )
   }
 }

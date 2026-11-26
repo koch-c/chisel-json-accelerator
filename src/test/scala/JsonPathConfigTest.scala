@@ -45,7 +45,7 @@ class JsonPathConfigTest extends AnyFlatSpec {
 
   it should "reject a configuration without parsers" in {
     intercept[IllegalArgumentException](
-      JsonPathConfig(Seq(FieldSpec(Seq("id"))), parsersPerType = 0)
+      JsonPathConfig(Seq(FieldSpec(Seq("id"))), numericParsers = 0)
     )
   }
 }

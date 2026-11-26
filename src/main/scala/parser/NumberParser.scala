@@ -11,7 +11,6 @@ import chisel3.util._
   * set.
   */
 class ParsedNumber extends Bundle {
-  val attributeId = UInt(8.W)
   val negative = Bool()
   val integer = UInt(64.W)
   val mantissa = UInt(64.W)
@@ -66,7 +65,6 @@ class NumberParser extends Module {
   val signR = RegInit(false.B)
   val eSignR = RegInit(false.B)
   val isFloatR = RegInit(false.B)
-  val attributeIdR = RegInit(0.U(8.W))
   val lastR = RegInit(false.B) // the attribute's final byte has been taken
   val overflowR = RegInit(false.B)
   val notANumberR = RegInit(false.B)
@@ -75,7 +73,6 @@ class NumberParser extends Module {
   io.in.ready := state =/= done && !lastR
   io.out.valid := state === done
 
-  io.out.bits.attributeId := attributeIdR
   io.out.bits.negative := signR
   io.out.bits.integer := intR
   io.out.bits.mantissa := mantissaR
@@ -164,7 +161,6 @@ class NumberParser extends Module {
 
   // Checks what attribute we are loading at every cycle and when the final byte have been taken.
   when(io.in.fire) {
-    attributeIdR := io.in.bits.attributeId
     when(io.in.bits.last) { lastR := true.B }
   }
 

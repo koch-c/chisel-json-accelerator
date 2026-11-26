@@ -1,16 +1,9 @@
 import chisel3._
 import chisel3.util._
 
-/** Streaming scalar-value JSON extractor with byte-level ready/valid ports.
-  * Each valid JSON object line, including LF, must fit within 4096 bytes. out
-  * depends on the value type of the matched path: the exact bytes of the
-  * attribute without added framing (Raw), a NumberSerializer frame, or a
-  * StringParser frame. Values are sent in document order. done pulses for one
-  * cycle after LF, parsing, and all output transfers finish. It denotes byte
-  * acceptance by the consumer, not physical UART completion.
-  */
+/** Emits one fixed-size record per JSON line (up to 4096 input bytes). */
 class Accelerator(
-    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("temperature"))))
+    config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("id"))))
 ) extends Module {
 
   val io = IO(new Bundle {
@@ -42,7 +35,9 @@ class Accelerator(
   }
   val pda = withReset(recordReset) { Module(new PushdownAutomaton(config)) }
   val loader = withReset(recordReset) { Module(new AttributeLoader(config)) }
-  val execution = withReset(recordReset) { Module(new ExecutionStage(config)) }
+  val parserBank = withReset(recordReset) {
+    Module(new ValueParserBank(config))
+  }
   val buffer = Module(new InputBuffer)
 
   // Stop at LF until this record has drained and its pipeline is reset.
@@ -80,18 +75,22 @@ class Accelerator(
   pda.io.in <> fifo.io.out
   loader.io.descriptor <> pda.io.descriptor
   loader.io.endOfRecord := pda.io.endOfRecord
-  execution.io.channels <> loader.io.channels
-  execution.io.reorder <> loader.io.reorder
-
-  // The execution stage loads each value and sends it raw, as a number or as
-  // a string, depending on the value type of its path.
-  io.out <> execution.io.out
-
-  // The end marker can drain before LF arrives. Remember it until the full
-  // line is stored; all preceding output bytes have already been accepted.
+  parserBank.io.channels <> loader.io.channels
+  val reorder = withReset(recordReset) {
+    Module(new Queue(new DispatchEntry(config), 16))
+  }
+  val assembler = withReset(recordReset) { Module(new RecordAssembler(config)) }
+  val serializer = withReset(recordReset) {
+    Module(new RecordSerializer(config.recordBytes))
+  }
+  reorder.io.enq <> loader.io.reorder
+  assembler.io.reorder <> reorder.io.deq
+  assembler.io.numbers <> parserBank.io.numbers
+  assembler.io.strings <> parserBank.io.strings
+  serializer.io.record <> assembler.io.record
+  io.out <> serializer.io.out
   val endDrained = RegInit(false.B)
-  when(execution.io.recordDrained) { endDrained := true.B }
-
+  when(assembler.io.record.fire) { endDrained := true.B }
   clearRecord := false.B
   when(!clearRecord && lineStored && endDrained) {
     clearRecord := true.B
