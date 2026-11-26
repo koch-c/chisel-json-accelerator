@@ -35,15 +35,39 @@ config:
   elk:
     mergeEdges: true
 ---
-flowchart LR
-    RX[UartRx] --> INPUT[InputFIFO]
-    INPUT -->|8-byte words| LEXER[Parallel Lexer]
-    LEXER -->|Up to 8 symbols per batch| FIFO[ChannelFifo]
-    FIFO -->|Up to 2 symbols per cycle| PDA[PushdownAutomaton]
-    PDA -->|Value Info| LOADER[AttributeLoader]
-    INPUT --> BUFFER[InputBuffer]
-    BUFFER -->|Original value bytes| LOADER
-    LOADER --> TX[UartTx]
+flowchart TD
+    RX[UartRx]
+
+    subgraph CORE[Accelerator]
+        subgraph EXTRACT[extract]
+            INPUT[InputFIFO] -->|8-byte words| LEXER[Parallel Lexer]
+            INPUT -->|8-byte words| BUFFER[(InputBuffer)]
+            LEXER --> FIFO[ChannelFifo] --> PDA[PushdownAutomaton]
+            PDA -->|Descriptors| LOADER[AttributeLoader]
+            BUFFER -->|Stored words| LOADER
+        end
+
+        subgraph PARSE[parser]
+            UNPACK[Per-channel queue and WordUnpacker]
+            UNPACK --> NUM[NumberParser]
+            UNPACK --> STR[StringParser]
+        end
+
+        subgraph OUTPUT[output]
+            REORDER[Reorder Queue] --> ASSEMBLER[RecordAssembler]
+            ASSEMBLER --> FILTER[RecordFilter]
+            ASSEMBLER -->|Complete record| SERIALIZER[RecordSerializer]
+            FILTER -->|Keep or reject| SERIALIZER
+        end
+
+        LOADER -->|Value chunks by channel| UNPACK
+        LOADER -->|Result order and end marker| REORDER
+        NUM --> ASSEMBLER
+        STR --> ASSEMBLER
+    end
+
+    RX --> INPUT
+    SERIALIZER -->|Outcome byte and optional record| TX[UartTx]
 ```
 
 - `UartRx` receives the JSON bytes from our computer over UART and passes them to the `InputFIFO`.
