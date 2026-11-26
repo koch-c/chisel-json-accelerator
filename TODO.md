@@ -6,8 +6,7 @@
 - [ ] Implement golden model
 - [ ] Make estimates on throughput
 - [ ] Obtain clever stats of the design such as ressource usage, clock cycle, kind of memory
-- [ ] Go through tests and make sure they are good
-
+- [ ] Go through most of the tests to understand them and make sure they are good (start with `InputFIFOTest`).
 # Presentation
 
 - What is the biggest remaining uncertainty in our project?
@@ -35,4 +34,3 @@ Memory
 ▶A non-power-of-two size, if supported
 ▶Optional features enabled and disabled
 ▶Illegal configurations, which should be rejected clearly
-

@@ -29,9 +29,17 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
 
     def send(text: String): Unit = {
-      for (byte <- text.getBytes("UTF-8")) {
+      val bytes = text.getBytes("UTF-8").map(_ & 0xff)
+      for (batch <- bytes.grouped(8)) {
         c.io.in.valid.poke(true.B)
-        c.io.in.bits.poke((byte & 0xff).U)
+        c.io.in.bits.count.poke(batch.length.U)
+        for (lane <- 0 until 8) {
+          c.io.in.bits
+            .bytes(lane)
+            .poke(
+              (if (lane < batch.length) batch(lane) else 0).U
+            )
+        }
         var waited = 0
         while (!c.io.in.ready.peek().litToBoolean && waited < 2000) {
           tick()
@@ -78,7 +86,8 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
   ): Unit = {
     test(new Accelerator(config)) { c =>
       c.io.in.valid.poke(false.B)
-      c.io.in.bits.poke(0.U)
+      c.io.in.bits.count.poke(0.U)
+      for (lane <- 0 until 8) c.io.in.bits.bytes(lane).poke(0.U)
       c.io.out.ready.poke(true.B)
       body(new Driver(c, stall))
     }

@@ -11,33 +11,26 @@ class InputFIFO(depthWords: Int = 8) extends Module {
   require(depthWords > 0, "Input FIFO must hold at least one word")
 
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(UInt(8.W)))
+    val in = Flipped(Decoupled(new Batch(8)))
     val out = Decoupled(Vec(8, UInt(8.W)))
   })
 
   val words = Module(new Queue(Vec(8, UInt(8.W)), depthWords))
-  val partial = Reg(Vec(8, UInt(8.W)))
-  val count = RegInit(0.U(3.W))
-  val completesWord = count === 7.U || io.in.bits === 10.U
+  // The count is valid as long as the count is not zero and <= than eight.
+  val countValid = io.in.bits.count =/= 0.U && io.in.bits.count <= 8.U
 
-  // A completing byte and its word are accepted atomically. Earlier bytes can
-  // still accumulate in the partial register even while the word queue is full.
-  io.in.ready := !completesWord || words.io.enq.ready
-  words.io.enq.valid := io.in.valid && completesWord
+  // If the count is valid, we can accept the input.
+  io.in.ready := words.io.enq.ready && countValid
+  words.io.enq.valid := io.in.valid && countValid
+
+
   for (i <- 0 until 8) {
     words.io.enq.bits(i) := Mux(
-      i.U < count,
-      partial(i),
-      Mux(i.U === count, io.in.bits, 32.U(8.W))
+      i.U < io.in.bits.count,
+      io.in.bits.bytes(i),
+      32.U(8.W)
     )
   }
-  when(io.in.fire) {
-    when(completesWord) {
-      count := 0.U
-    }.otherwise {
-      partial(count) := io.in.bits
-      count := count + 1.U
-    }
-  }
+
   io.out <> words.io.deq
 }

@@ -67,7 +67,8 @@ class AcceleratorBenchmarkSpec extends AnyFlatSpec with ChiselScalatestTester {
     var result: Option[Result] = None
     test(new Accelerator(config, pdaWidth = pdaWidth)) { c =>
       c.io.in.valid.poke(false.B)
-      c.io.in.bits.poke(0.U)
+      c.io.in.bits.count.poke(0.U)
+      for (lane <- 0 until 8) c.io.in.bits.bytes(lane).poke(0.U)
       c.io.out.ready.poke(true.B)
 
       val output = scala.collection.mutable.ArrayBuffer.empty[Int]
@@ -80,17 +81,23 @@ class AcceleratorBenchmarkSpec extends AnyFlatSpec with ChiselScalatestTester {
 
       while (doneCycle < 0 && cycle < timeoutCycles) {
         val inputValid = inputIndex < input.length
+        val batch = input.slice(inputIndex, inputIndex + 8)
         c.io.in.valid.poke(inputValid.B)
-        c.io.in.bits.poke(
-          (if (inputValid) input(inputIndex) else 0).U
-        )
+        c.io.in.bits.count.poke((if (inputValid) batch.length else 0).U)
+        for (lane <- 0 until 8) {
+          c.io.in.bits
+            .bytes(lane)
+            .poke(
+              (if (inputValid && lane < batch.length) batch(lane) else 0).U
+            )
+        }
 
         val inputFire =
           inputValid && c.io.in.ready.peek().litToBoolean
         if (inputFire) {
           if (firstInputCycle < 0) firstInputCycle = cycle
           lastInputCycle = cycle
-          inputIndex += 1
+          inputIndex += batch.length
         }
 
         if (c.io.out.valid.peek().litToBoolean) {

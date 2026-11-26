@@ -9,7 +9,7 @@ class Accelerator(
 ) extends Module {
 
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(UInt(8.W)))
+    val in = Flipped(Decoupled(new Batch(8)))
     val out = Decoupled(UInt(8.W))
     val done =
       Output(Bool()) // TODO: Only used for testing. Consider removing in prod
@@ -49,7 +49,12 @@ class Accelerator(
   inputFIFO.io.in.bits := io.in.bits
   inputFIFO.io.in.valid := io.in.valid && !inputClosed && !clearRecord
   io.in.ready := inputFIFO.io.in.ready && !inputClosed && !clearRecord
-  when(inputFIFO.io.in.fire && inputFIFO.io.in.bits === 10.U) {
+
+  val batchHasLF = (0 until 8).map { i =>
+    (io.in.bits.count > i.U) && (io.in.bits.bytes(i) === 10.U)
+  }.reduce(_ || _)
+
+  when(inputFIFO.io.in.fire && batchHasLF) {
     inputClosed := true.B
   }
 
