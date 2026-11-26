@@ -22,8 +22,11 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
     extends Module {
   val io = IO(new Bundle {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
+    val endOfRecord = Input(Bool()) // the PDA's end-of-record pulse
     val out = Decoupled(UInt(8.W))
-    val busy = Output(Bool()) // an attribute is still being loaded or sent
+    // An attribute is still being loaded or sent, or an end of record has not
+    // passed through the reorder FIFO yet.
+    val busy = Output(Bool())
 
     // Read port of the InputBuffer.
     val readEnable = Output(Bool())
@@ -39,6 +42,7 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
   val reorder = Module(new Queue(new ReorderEntry, reorderDepth))
 
   loader.io.descriptor <> io.descriptor
+  loader.io.endOfRecord := io.endOfRecord
   io.readEnable := loader.io.readEnable
   io.readAddress := loader.io.readAddress
   loader.io.readData := io.readData
@@ -57,6 +61,9 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
   )
   val headId = reorder.io.deq.bits.attributeId
   val headValid = reorder.io.deq.valid
+  // An end-of-record entry belongs to no channel. Nothing reads it here yet,
+  // so it is taken out as soon as it reaches the head.
+  val headIsEnd = headValid && reorder.io.deq.bits.endOfRecord
   val isType = config.usedValueTypes.map { valueType =>
     config.fields.zipWithIndex
       .collect {
@@ -72,7 +79,8 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
   )
 
   // isHead(i): channel i holds the attribute that is next in document order.
-  val isHead = channels.indices.map(i => headValid && head === i.U)
+  val isHead =
+    channels.indices.map(i => headValid && !headIsEnd && head === i.U)
 
   io.out.valid := Mux1H(isHead, channels.map(_.io.out.valid))
   io.out.bits := Mux1H(isHead, channels.map(_.io.out.bits))
@@ -82,7 +90,7 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
 
   // The final byte lets the next attribute send.
   val finished = io.out.fire && Mux1H(isHead, channels.map(_.io.last))
-  reorder.io.deq.ready := finished
+  reorder.io.deq.ready := finished || headIsEnd
   when(finished) {
     for ((pointer, k) <- pointers.zipWithIndex) {
       when(isType(k)) {
@@ -91,7 +99,8 @@ class ExecutionStage(config: JsonPathConfig, reorderDepth: Int = 16)
     }
   }
 
-  // A descriptor counts from the cycle it is offered, so there is no gap
-  // before its reorder entry shows up.
-  io.busy := headValid || io.descriptor.valid
+  // A descriptor and an end of record count from the cycle they are offered,
+  // so there is no gap before their reorder entries show up.
+  io.busy := headValid || io.descriptor.valid ||
+    io.endOfRecord || loader.io.endPending
 }

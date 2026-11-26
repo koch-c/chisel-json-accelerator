@@ -10,6 +10,7 @@ class ExecutionStageHarness(config: JsonPathConfig) extends Module {
     val writeAddress = Input(UInt(9.W))
     val writeData = Input(UInt(64.W))
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
+    val endOfRecord = Input(Bool())
     val out = Decoupled(UInt(8.W))
     val busy = Output(Bool())
   })
@@ -23,6 +24,7 @@ class ExecutionStageHarness(config: JsonPathConfig) extends Module {
   stage.io.readData := buffer.io.readData
   stage.io.readValid := buffer.io.readValid
   stage.io.descriptor <> io.descriptor
+  stage.io.endOfRecord := io.endOfRecord
   io.out <> stage.io.out
   io.busy := stage.io.busy
 }
@@ -40,6 +42,7 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
 
     c.io.writeEnable.poke(false.B)
     c.io.descriptor.valid.poke(false.B)
+    c.io.endOfRecord.poke(false.B)
     c.io.out.ready.poke(false.B)
 
     def tick(): Unit = {
@@ -92,6 +95,13 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       if (accepted) tick()
       c.io.descriptor.valid.poke(false.B)
       accepted
+    }
+
+    /** Pulses endOfRecord for one cycle, as the PDA does. */
+    def endOfRecord(): Unit = {
+      c.io.endOfRecord.poke(true.B)
+      tick()
+      c.io.endOfRecord.poke(false.B)
     }
 
     /** Loads the attributes and submits one descriptor for each. */
@@ -258,6 +268,26 @@ class ExecutionStageSpec extends AnyFlatSpec with ChiselScalatestTester {
       for (i <- 16 until 20) assert(d.submit(starts(i), 3, 0))
       d.waitUntilIdle()
       assert(d.output.toSeq == values.flatMap(v => int32Frame(0, v)))
+    }
+  }
+
+  it should "pass over end-of-record entries and keep the order" in {
+    val config = JsonPathConfig(
+      Seq(FieldSpec(Seq("v"), ValueType.Int32)),
+      parsersPerType = 2
+    )
+    run(config) { d =>
+      val attributes = Seq(": 1", ": 2", ": 3", ": 4", ": 5")
+      val starts = d.load(attributes)
+      // Three records of 3, 0 and 2 attributes, without a reset in between.
+      for (i <- 0 until 3) assert(d.submit(starts(i), 3, 0))
+      d.endOfRecord()
+      for (_ <- 0 until 3) d.tick()
+      d.endOfRecord()
+      for (i <- 3 until 5) assert(d.submit(starts(i), 3, 0))
+      d.endOfRecord()
+      d.waitUntilIdle()
+      assert(d.output.toSeq == (1 to 5).flatMap(v => int32Frame(0, v)))
     }
   }
 
