@@ -77,16 +77,3 @@ class RecordAssembler(c: JsonPathConfig) extends Module {
   }
   when(io.record.fire) { complete := false.B; status.foreach(_ := 0.U) }
 }
-
-/** Borrow the assembled record until the consumer accepts its final byte. */
-class RecordSerializer(size: Int) extends Module {
-  val io = IO(new Bundle {
-    val record = Flipped(Decoupled(Vec(size, UInt(8.W))))
-    val out = Decoupled(UInt(8.W))
-  })
-  val index = RegInit(0.U(log2Ceil(size max 2).W))
-  io.out.valid := io.record.valid
-  io.out.bits := io.record.bits(index)
-  io.record.ready := io.out.ready && index === (size - 1).U
-  when(io.out.fire) { index := Mux(io.record.ready, 0.U, index + 1.U) }
-}

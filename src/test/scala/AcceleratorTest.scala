@@ -96,13 +96,13 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
     run(cfg, stall = true) { d =>
       d.recordBytes(
         """{"w":-1,"s":"abc","n":0}""" + "\n",
-        Seq(29) ++ Seq.fill(8)(0) ++ Seq.fill(8)(255)
+        Seq(1, 29) ++ Seq.fill(8)(0) ++ Seq.fill(8)(255)
       )
       d.recordBytes(
         """{"s":"xy","s":"a","n":2147483648}""" + "\n",
-        Seq(7, 0, 0, 0, 0, 1, 0, 97, 0) ++ Seq.fill(8)(0)
+        Seq(1, 7, 0, 0, 0, 0, 1, 0, 97, 0) ++ Seq.fill(8)(0)
       )
-      d.recordBytes("""{"s":1}""" + "\n", Seq(8) ++ Seq.fill(16)(0))
+      d.recordBytes("""{"s":1}""" + "\n", Seq(1, 8) ++ Seq.fill(16)(0))
     }
   }
   it should "hold completion until LF and output acceptance" in {
@@ -112,10 +112,78 @@ class AcceleratorSpec extends AnyFlatSpec with ChiselScalatestTester {
       for (_ <- 0 until 80) d.tick()
       assert(d.completions == 0)
       d.allowOutput = true
-      d.waitFor(d.output.length == 5)
+      d.waitFor(d.output.length == 6)
       for (_ <- 0 until 10) d.tick()
       assert(d.completions == 0)
-      d.recordBytes("\n", Seq(1, 1, 0, 0, 0))
+      d.recordBytes("\n", Seq(1, 1, 1, 0, 0, 0))
+    }
+  }
+
+  it should "AND signed integer and exact string predicates" in {
+    val n = Seq("n")
+    val s = Seq("s")
+    val config = JsonPathConfig(
+      Seq(FieldSpec(n), FieldSpec(s, ValueType.String, 4)),
+      filters = Seq(
+        FilterSpec(n, CompareOp.Lt, IntLit(0)),
+        FilterSpec(s, CompareOp.Eq, StrLit("Ada"))
+      )
+    )
+    run(config, stall = true) { d =>
+      val kept = Seq(1, 5, 255, 255, 255, 255, 3, 0, 65, 100, 97, 0)
+      d.recordBytes("{\"s\":\"Ada\",\"n\":-1}\n", kept)
+      d.recordBytes("{\"s\":\"Ada!\",\"n\":-1}\n", Seq(0))
+      d.recordBytes("{\"s\":\"Ada\",\"n\":1}\n", Seq(0))
+      d.recordBytes("{\"s\":\"Ada\"}\n", Seq(0))
+      d.recordBytes("{\"s\":\"Ada\",\"n\":2147483648}\n", Seq(0))
+      d.recordBytes("{\"s\":\"Ada\",\"n\":null}\n", Seq(0))
+      d.recordBytes("{\"s\":\"Ada\",\"n\":-1}\n", kept)
+    }
+  }
+
+  it should "send a rejection byte between two kept records" in {
+    val path = Seq("v")
+    val config = JsonPathConfig(
+      Seq(FieldSpec(path)),
+      filters = Seq(FilterSpec(path, CompareOp.Gt, IntLit(0)))
+    )
+    run(config) { d =>
+      d.recordBytes("{\"v\":1}\n", Seq(1, 1, 1, 0, 0, 0))
+      d.recordBytes("{\"v\":0}\n", Seq(0))
+      d.recordBytes("{\"v\":2}\n", Seq(1, 1, 2, 0, 0, 0))
+    }
+  }
+
+  it should "send invalid or missing Int64 slots when there are no filters" in {
+    val config = JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.Int64)))
+    run(config) { d =>
+      d.recordBytes("{\"v\":-12.5}\n", Seq(1, 2) ++ Seq.fill(8)(0))
+      d.recordBytes("{}\n", Seq(1, 0) ++ Seq.fill(8)(0))
+    }
+  }
+
+  it should "wait for the rejection byte or final kept byte to be accepted" in {
+    val path = Seq("v")
+    val config = JsonPathConfig(
+      Seq(FieldSpec(path)),
+      filters = Seq(FilterSpec(path, CompareOp.Eq, IntLit(1)))
+    )
+    run(config) { d =>
+      d.allowOutput = false
+      d.send("{}\n")
+      for (_ <- 0 until 30) d.tick()
+      assert(d.completions == 0 && d.output.isEmpty)
+      d.allowOutput = true
+      d.waitFor(d.completions == 1)
+      d.expectBytes(Seq(0))
+      d.send("{\"v\":1}\n")
+      d.waitFor(d.output.length == 5)
+      d.allowOutput = false
+      for (_ <- 0 until 20) d.tick()
+      assert(d.completions == 1 && d.output.length == 5)
+      d.allowOutput = true
+      d.waitFor(d.completions == 2)
+      d.expectBytes(Seq(1, 1, 1, 0, 0, 0))
     }
   }
 }

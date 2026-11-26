@@ -48,4 +48,28 @@ class JsonPathConfigTest extends AnyFlatSpec {
       JsonPathConfig(Seq(FieldSpec(Seq("id"))), numericParsers = 0)
     )
   }
+
+  it should "resolve filter paths and reject filters incompatible with the layout" in {
+    val id = Seq("id")
+    val name = Seq("user", "name")
+    val fields = Seq(FieldSpec(id), FieldSpec(name, ValueType.String, 2))
+    val valid = FilterSpec(name, CompareOp.Eq, StrLit("é"))
+    assert(
+      JsonPathConfig(fields, filters = Seq(valid)).resolvedFilters == Seq(
+        1 -> valid
+      )
+    )
+    val invalid = Seq(
+      valid.copy(path = Seq("name")),
+      valid.copy(op = CompareOp.Lt),
+      valid.copy(value = StrLit("éa")),
+      valid.copy(value = IntLit(1)),
+      FilterSpec(id, CompareOp.Eq, IntLit(BigInt(1) << 31))
+    )
+    for (predicate <- invalid) {
+      intercept[IllegalArgumentException](
+        JsonPathConfig(fields, filters = Seq(predicate))
+      )
+    }
+  }
 }

@@ -1,7 +1,7 @@
 import chisel3._
 import chisel3.util._
 
-/** Emits one fixed-size record per JSON line (up to 4096 input bytes). */
+/** Emits an outcome byte and, if kept, a fixed-size record per JSON line. */
 class Accelerator(
     config: JsonPathConfig = JsonPathConfig(Seq(FieldSpec(Seq("id"))))
 ) extends Module {
@@ -87,7 +87,10 @@ class Accelerator(
   assembler.io.reorder <> reorder.io.deq
   assembler.io.numbers <> parserBank.io.numbers
   assembler.io.strings <> parserBank.io.strings
+  val filter = Module(new RecordFilter(config))
   serializer.io.record <> assembler.io.record
+  filter.io.record := assembler.io.record.bits
+  serializer.io.keep := filter.io.keep
   io.out <> serializer.io.out
   val endDrained = RegInit(false.B)
   when(assembler.io.record.fire) { endDrained := true.B }

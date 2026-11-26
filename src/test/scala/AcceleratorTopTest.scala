@@ -11,8 +11,7 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
     */
   private def exchange(
       config: JsonPathConfig,
-      json: String,
-      expected: Seq[Int]
+      requests: Seq[(String, Seq[Int])]
   ): Unit = {
     val clocksPerBit = 8
     test(new AcceleratorTop(config, clockHz = 80, baudRate = 10)) { c =>
@@ -50,12 +49,7 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // The host waits for the whole response before starting the next line.
-      for (
-        (line, response) <- Seq(
-          json -> expected,
-          "{}\n" -> Seq.fill(config.recordBytes)(0)
-        )
-      ) {
+      for ((line, response) <- requests) {
         received.clear()
         for (b <- line.getBytes("UTF-8")) {
           val bits = Seq(false) ++ (0 until 8).map(i =>
@@ -85,17 +79,7 @@ class AcceleratorTopSpec extends AnyFlatSpec with ChiselScalatestTester {
   "AcceleratorTop" should "connect UART RX through the core to unmodified UART TX" in {
     exchange(
       JsonPathConfig(Seq(FieldSpec(Seq("v")))),
-      "{\"v\":1}\n",
-      Seq(1, 1, 0, 0, 0)
-    )
-  }
-
-  it should "send an invalid integer record over UART" in {
-    // Fractional syntax is invalid for an Int64 slot.
-    exchange(
-      JsonPathConfig(Seq(FieldSpec(Seq("v"), ValueType.Int64))),
-      "{\"v\":-12.5}\n",
-      Seq(2) ++ Seq.fill(8)(0)
+      Seq("{\"v\":1}\n" -> Seq(1, 1, 1, 0, 0, 0))
     )
   }
 }

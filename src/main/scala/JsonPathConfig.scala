@@ -27,9 +27,7 @@ final case class FilterSpec(
     value: FilterValue
 )
 
-/** Object-key-only query. A field's index is its 8-bit attribute ID. Filters
-  * are configuration only; the accelerator does not apply them yet.
-  */
+/** Object-key-only query. A field's index is its 8-bit attribute ID. */
 final case class JsonPathConfig(
     fields: Seq[FieldSpec],
     maxDepth: Int = 8,
@@ -53,10 +51,36 @@ final case class JsonPathConfig(
   )
 
   val attributeIds: Map[Seq[String], Int] = paths.zipWithIndex.toMap
-  require(
-    filters.forall(filter => attributeIds.contains(filter.path)),
-    "filters must reference projected fields"
-  )
+  val resolvedFilters: Seq[(Int, FilterSpec)] = filters.map { filter =>
+    require(
+      attributeIds.contains(filter.path),
+      "filters must reference projected fields"
+    )
+    val id = attributeIds(filter.path)
+    val field = fields(id)
+    (field.valueType, filter.value) match {
+      case (ValueType.String, StrLit(text)) =>
+        require(filter.op == CompareOp.Eq, "strings only support equality")
+        require(
+          text
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            .length <= field.stringBytes,
+          "string filter constant exceeds field capacity"
+        )
+      case (ValueType.Int32 | ValueType.Int64, IntLit(value)) =>
+        val width = if (field.valueType == ValueType.Int32) 32 else 64
+        val limit = BigInt(1) << (width - 1)
+        require(
+          value >= -limit && value < limit,
+          "integer filter constant does not fit field"
+        )
+      case _ =>
+        throw new IllegalArgumentException(
+          "filter constant must match the field type"
+        )
+    }
+    id -> filter
+  }
   require(numericParsers >= 1 && stringParsers >= 1)
   require(
     fields.forall(f =>
