@@ -11,8 +11,8 @@ class AttributeLoaderHarness(config: JsonPathConfig) extends Module {
     val writeData = Input(UInt(64.W))
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
     val channels =
-      Vec(config.channelCount, Decoupled(new AttributeWord))
-    val reorder = Decoupled(new DispatchEntry(config))
+      Vec(config.channelCount, Decoupled(new ValueChunk))
+    val reorder = Decoupled(new ResultOrderEntry(config))
     val endOfRecord = Input(Bool())
   })
 

@@ -20,7 +20,7 @@ class AttributeByte extends Bundle {
 //     - lastByte:    lane of the last byte that belongs to the attribute
 //     - last:        this is the final word of the attribute
 
-class AttributeWord extends Bundle {
+class ValueChunk extends Bundle {
   val data = UInt(64.W)
   val firstByte = UInt(3.W)
   val lastByte = UInt(3.W)
@@ -47,8 +47,8 @@ class AttributeWord extends Bundle {
 class AttributeLoader(config: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
     val descriptor = Flipped(Decoupled(new AttributeDescriptor))
-    val channels = Vec(config.channelCount, Decoupled(new AttributeWord))
-    val reorder = Decoupled(new DispatchEntry(config))
+    val channels = Vec(config.channelCount, Decoupled(new ValueChunk))
+    val reorder = Decoupled(new ResultOrderEntry(config))
 
     // The PDA's end-of-record pulse. It never comes before the last descriptor
     // of its record has been accepted. The next record does not start until

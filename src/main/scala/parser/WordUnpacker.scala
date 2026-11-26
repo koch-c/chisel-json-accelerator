@@ -5,7 +5,7 @@ import chisel3.util._
 
 class WordUnpacker() extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new AttributeWord))
+    val in = Flipped(Decoupled(new ValueChunk))
     val out = Decoupled(new AttributeByte)
   })
   val midWord = RegInit(false.B)

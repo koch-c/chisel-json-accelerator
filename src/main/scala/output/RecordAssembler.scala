@@ -6,7 +6,7 @@ import chisel3.util._
   */
 class RecordAssembler(c: JsonPathConfig) extends Module {
   val io = IO(new Bundle {
-    val reorder = Flipped(Decoupled(new DispatchEntry(c)))
+    val reorder = Flipped(Decoupled(new ResultOrderEntry(c)))
     val numbers = Flipped(Vec(c.numbers, Decoupled(new ParsedNumber)))
     val strings = Flipped(Vec(c.strings, Decoupled(new TextBeat)))
     val record = Decoupled(Vec(c.recordBytes, UInt(8.W)))

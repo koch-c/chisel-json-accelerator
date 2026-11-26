@@ -77,7 +77,7 @@ class Accelerator(
   loader.io.endOfRecord := pda.io.endOfRecord
   parserBank.io.channels <> loader.io.channels
   val reorder = withReset(recordReset) {
-    Module(new Queue(new DispatchEntry(config), 16))
+    Module(new Queue(new ResultOrderEntry(config), 16))
   }
   val assembler = withReset(recordReset) { Module(new RecordAssembler(config)) }
   val serializer = withReset(recordReset) {
