@@ -22,7 +22,7 @@ class ValueParserBank(config: JsonPathConfig) extends Module {
     val strings = Vec(config.strings, Decoupled(new TextBeat))
   })
   for (i <- 0 until config.channelCount) {
-    val unpack = Module(new WordUnpacker)
+    val unpack = Module(new ChunkToBytes)
     unpack.io.in <> Queue(io.channels(i), 4)
     if (i < config.numbers) {
       val parser = Module(new NumberParser)

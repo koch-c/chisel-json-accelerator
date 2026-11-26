@@ -2,14 +2,14 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
-class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
+class ChunkToBytesSpec extends AnyFlatSpec with ChiselScalatestTester {
   private case class Out(data: Char, last: Boolean)
 
   /** Character i of the text goes in byte i. */
   private def word(text: String): BigInt =
     text.zipWithIndex.map { case (ch, i) => BigInt(ch.toInt) << (8 * i) }.sum
 
-  private class Driver(c: WordUnpacker, stall: Boolean) {
+  private class Driver(c: ChunkToBytes, stall: Boolean) {
     val out = scala.collection.mutable.ArrayBuffer[Out]()
     // The cycle in which each byte of out was accepted.
     val cycles = scala.collection.mutable.ArrayBuffer[Int]()
@@ -53,9 +53,9 @@ class WordUnpackerSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   private def run(stall: Boolean)(body: Driver => Unit): Unit =
-    test(new WordUnpacker)(c => body(new Driver(c, stall)))
+    test(new ChunkToBytes)(c => body(new Driver(c, stall)))
 
-  behavior of "WordUnpacker"
+  behavior of "ChunkToBytes"
 
   for (stall <- Seq(false, true)) {
     it should s"send bytes 2 to 5 of one word (stall = $stall)" in run(stall) {

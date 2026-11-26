@@ -59,7 +59,7 @@ flowchart LR
         end
 
         subgraph PARSE[parser]
-            UNPACK[Per-channel queue and WordUnpacker]
+            UNPACK[Per-channel queue and ChunkToBytes]
             UNPACK --> NUM[NumberParser]
             UNPACK --> STR[StringParser]
         end
@@ -98,15 +98,33 @@ flowchart LR
     class RX,TX uartNode
 ```
 
-- `UartRx` receives the JSON bytes from our computer over UART and passes them to the `InputFIFO`.
-- `InputFIFO` packs the incoming bytes into 8-byte words, adapting the byte-by-byte UART input to the wider input of the `Lexer`. The same words are also written to the `InputBuffer`, so we can retrieve the original values later.
-- `Lexer` examines all eight bytes of a word in parallel and can accept one word per cycle when unstalled. It carries string and escape state across word boundaries, then emits structural characters and recognized keys as symbols with their byte positions. Each output batch contains up to eight symbols in input order; words with no symbols produce no batch.
-- `ChannelFifo` buffers symbols, accepting batches of up to eight from the `Lexer` and delivering up to two symbols per cycle to the `PushdownAutomaton`. This absorbs bursts of symbols so the lexer only has to stall when the FIFO is full.
-- `PushdownAutomaton` uses a stack to keep track of the current path through the JSON and compares it with the query the FPGA has been synthesized to match. When it finds a matching value, it sends the value's location to the `AttributeLoader`.
-- `InputBuffer` stores the original JSON bytes while the symbols move through the parser. The `AttributeLoader` reads from this buffer to retrieve a matching value without having to reconstruct it from symbols.
-- `AttributeLoader` uses the location from the `PushdownAutomaton` to read the matching value from the `InputBuffer`. It then passes the original value bytes to `UartTx`.
-- `UartTx` sends the extracted value bytes back to our computer over UART, completing the flow.
-<!-- TODO: Document the NumberParser and NumberSerializer output path. -->
+#### `extract`
+
+- `InputFIFO` packs the incoming bytes into 8-byte words, adapting the byte stream to the wider input of the `Lexer`. The same words are also written to the `InputBuffer`, so we can retrieve the original values later.
+- `Lexer` examines all eight bytes of a word in parallel and can accept one word per cycle when unstalled. It carries string and escape state across word boundaries, then emits structural characters and recognized keys as symbols with their byte positions. Each output batch contains up to eight symbols in input order.
+- `ChannelFifo` buffers symbols, accepting batches of up to eight from the `Lexer` and delivering up to two symbols per cycle to the `PushdownAutomaton`. This absorbs bursts of symbols and stalls the lexer if there isn't room for its next batch.
+- `PushdownAutomaton` uses a stack to keep track of the current path through the JSON and compares it with the query the FPGA has been synthesized to match. When it finds a matching value, it sends the value's location and length to the `AttributeLoader`. It also signals the end of a record when it encounters the final `}` of the JSON.
+- `InputBuffer` stores the original JSON bytes while the symbols move through the pipeline. The `AttributeLoader` reads from this buffer to retrieve a matching value without having to reconstruct it from symbols.
+- `AttributeLoader` uses the location from the `PushdownAutomaton` to read the matching value from the `InputBuffer`. It sends the words as `ValueChunk`s to a parser channel and puts a `ResultOrderEntry` in the reorder queue so we know where to find the result and which field it belongs to when reassembling the parsed values in `RecordAssembler`.
+
+#### `parser`
+
+- `ValueParserBank` groups the numeric and string parser channels. Each channel has its own queue and `ChunkToBytes`, so the parsers can work in parallel.
+- `ChunkToBytes` takes the relevant bytes from each `ValueChunk` and sends them to the parser one byte at a time.
+- `NumberParser` reads a JSON number and produces its parsed components and flags. The `RecordAssembler` uses these to check whether the value fits the requested integer type.
+- `StringParser` decodes the JSON string and sends its bytes, followed by a final beat with error flags.
+
+#### `output`
+
+- The reorder queue keeps the field IDs and parser channels in the order the loader sent them, together with an end-of-record marker. This tells the assembler which result to read next even if another parser finishes first.
+- `RecordAssembler` reads those results and puts them in fixed-size slots in configuration order. It also records each field's status.
+- `RecordFilter` checks the assembled record against the configured predicates. The record is kept only if all of them pass.
+- `RecordSerializer` sends one outcome byte. If the record is kept, it follows that byte with the field statuses and payload slots.
+
+#### UART wrapper
+
+- `UartRx` receives the JSON bytes from our computer over UART and passes them to `Accelerator`.
+- `UartTx` sends the serialized response back to our computer over UART, completing the flow.
 
 ### Parameterization
 Our hardware generator takes a `JsonPathConfig`. This is where we tell JAW which fields to extract, how to represent them, and which records to keep. The configuration is compiled into the generated hardware. JAW supports paths made up of object keys: for example, we write `$.user.name` as `Seq("user", "name")`.

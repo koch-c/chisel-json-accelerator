@@ -3,7 +3,7 @@ import chisel3.util._
 
 // Unpacker module divides the word up so it can be handed to the parser.
 
-class WordUnpacker() extends Module {
+class ChunkToBytes() extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new ValueChunk))
     val out = Decoupled(new AttributeByte)

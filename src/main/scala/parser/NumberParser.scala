@@ -22,10 +22,10 @@ class ParsedNumber extends Bundle {
 
 /** Parses one number attribute, one byte per cycle.
   *
-  * The input is the byte stream of one attribute as the WordUnpacker sends it.
-  * It is not just the number: it starts at the colon and runs up to the next
-  * ',' or '}', e.g. ": 25" or ":-1.25e+2 ". The final byte has `last` set.
-  * Exactly one ParsedNumber is produced per attribute.
+  * The input is the byte stream of one attribute as ChunkToBytes sends it. It
+  * is not just the number: it starts at the colon and runs up to the next ','
+  * or '}', e.g. ": 25" or ":-1.25e+2 ". The final byte has `last` set. Exactly
+  * one ParsedNumber is produced per attribute.
   *
   * Not part of this module (yet): the IEEE754 conversion, several parsers in
   * parallel behind an arbiter, and the connection into Accelerator.
